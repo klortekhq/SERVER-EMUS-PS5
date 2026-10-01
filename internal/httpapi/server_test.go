@@ -91,6 +91,82 @@ func TestLibrariesEndpointDoesNotExposeHostPaths(t *testing.T) {
 	}
 }
 
+func TestCatalogConditionalCaching(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "disc1.chd"), []byte("ONE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.New(config.Config{Libraries: []config.Library{{
+		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".chd"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(cat, "secret")
+
+	first := httptest.NewRequest(http.MethodGet, "/api/v1/games?system=ps1", nil)
+	firstRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial status=%d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("catalog ETag missing")
+	}
+
+	unchangedRevision := cat.Revision()
+	if err := cat.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if cat.Revision() != unchangedRevision {
+		t.Fatalf("unchanged rebuild changed revision: %q -> %q", unchangedRevision, cat.Revision())
+	}
+
+	cached := httptest.NewRequest(http.MethodGet, "/api/v1/games?system=ps1", nil)
+	cached.Header.Set("If-None-Match", etag)
+	cachedRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(cachedRec, cached)
+	if cachedRec.Code != http.StatusNotModified {
+		t.Fatalf("cached status=%d want 304", cachedRec.Code)
+	}
+	if cachedRec.Body.Len() != 0 {
+		t.Fatalf("304 returned body %q", cachedRec.Body.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "disc2.chd"), []byte("TWO"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if cat.Revision() == etag {
+		t.Fatal("catalog revision did not change after adding a game")
+	}
+
+	stale := httptest.NewRequest(http.MethodGet, "/api/v1/games?system=ps1", nil)
+	stale.Header.Set("If-None-Match", etag)
+	staleRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(staleRec, stale)
+	if staleRec.Code != http.StatusOK {
+		t.Fatalf("stale status=%d body=%s", staleRec.Code, staleRec.Body.String())
+	}
+	if staleRec.Header().Get("ETag") == etag {
+		t.Fatal("stale request received old catalog ETag")
+	}
+	if !strings.Contains(staleRec.Body.String(), "disc2.chd") {
+		t.Fatalf("updated catalog missing new game: %s", staleRec.Body.String())
+	}
+
+	weak := httptest.NewRequest(http.MethodGet, "/api/v1/libraries", nil)
+	weak.Header.Set("If-None-Match", "W/"+cat.Revision())
+	weakRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(weakRec, weak)
+	if weakRec.Code != http.StatusNotModified {
+		t.Fatalf("weak ETag status=%d want 304", weakRec.Code)
+	}
+}
+
 func TestAuthenticatedCatalogRebuild(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "disc1.chd"), []byte("ONE"), 0o644); err != nil {
