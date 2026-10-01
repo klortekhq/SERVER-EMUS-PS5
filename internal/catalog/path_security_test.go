@@ -74,8 +74,12 @@ func TestCatalogAllowsContainedGameSymlinkAndOpensResolvedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	if opened.HostPath != target {
-		t.Fatalf("host path was not resolved: got %q want %q", opened.HostPath, target)
+	expectedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.HostPath != expectedTarget {
+		t.Fatalf("host path was not resolved: got %q want %q", opened.HostPath, expectedTarget)
 	}
 	body := make([]byte, len("contained"))
 	if _, err := file.Read(body); err != nil {
