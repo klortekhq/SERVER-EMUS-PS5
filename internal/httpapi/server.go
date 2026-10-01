@@ -60,6 +60,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"service": "SERVER-EMUS-PS5",
 		"api":     "v1",
+		"capabilities": map[string]any{
+			"byte_ranges":               true,
+			"anchored_virtual_sidecars": true,
+			"catalog_discovery":         true,
+			"catalog_etag":              true,
+			"catalog_rebuild":           s.token != "",
+		},
 	})
 }
 
