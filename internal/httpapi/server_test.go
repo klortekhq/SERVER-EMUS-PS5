@@ -104,7 +104,7 @@ func TestAnchoredSidecarRead(t *testing.T) {
 	}
 
 	cat, err := catalog.New(config.Config{Libraries: []config.Library{{
-		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".cue", ".bin"},
+		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".cue"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
