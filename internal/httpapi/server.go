@@ -68,17 +68,21 @@ func (s *Server) systems(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	if catalogNotModified(w, r, s.catalog.Revision()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, s.catalog.Systems())
 }
-
 func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	if catalogNotModified(w, r, s.catalog.Revision()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, s.catalog.Libraries())
 }
-
 func (s *Server) rebuildCatalog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -100,9 +104,10 @@ func (s *Server) rebuildCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"systems":   s.catalog.Systems(),
-		"libraries": s.catalog.Libraries(),
+		"ok":           true,
+		"catalog_etag": s.catalog.Revision(),
+		"systems":      s.catalog.Systems(),
+		"libraries":    s.catalog.Libraries(),
 	})
 }
 
@@ -111,9 +116,11 @@ func (s *Server) games(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	if catalogNotModified(w, r, s.catalog.Revision()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, s.catalog.Entries(r.URL.Query().Get("system")))
 }
-
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -149,6 +156,33 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeContent(w, r, entry.Name, entry.ModifiedAt, f)
+}
+
+func catalogNotModified(w http.ResponseWriter, r *http.Request, etag string) bool {
+	if etag == "" {
+		return false
+	}
+	w.Header().Set("ETag", etag)
+
+	header := r.Header.Get("If-None-Match")
+	if header == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			w.WriteHeader(http.StatusNotModified)
+			return true
+		}
+		if strings.HasPrefix(candidate, "W/") {
+			candidate = strings.TrimSpace(strings.TrimPrefix(candidate, "W/"))
+		}
+		if candidate == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return true
+		}
+	}
+	return false
 }
 
 func methodNotAllowed(w http.ResponseWriter, allow string) {
