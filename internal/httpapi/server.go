@@ -7,17 +7,31 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/klortekhq/server-emus-ps5/internal/catalog"
+	"github.com/klortekhq/server-emus-ps5/internal/config"
 )
 
 type Server struct {
-	catalog *catalog.Catalog
-	token   string
+	catalog    *catalog.Catalog
+	token      string
+	configPath string
+	cfg        config.Config
+	adminMu    sync.Mutex
 }
 
 func New(cat *catalog.Catalog, token string) *Server {
 	return &Server{catalog: cat, token: strings.TrimSpace(token)}
+}
+
+func NewManaged(cat *catalog.Catalog, cfg config.Config, configPath string) *Server {
+	return &Server{
+		catalog:    cat,
+		token:      strings.TrimSpace(cfg.Token),
+		configPath: strings.TrimSpace(configPath),
+		cfg:        cfg,
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -26,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/systems", s.systems)
 	mux.HandleFunc("/api/v1/libraries", s.libraries)
 	mux.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
+	mux.HandleFunc("/api/v1/admin/libraries", s.replaceLibraries)
 	mux.HandleFunc("/api/v1/games", s.games)
 	mux.HandleFunc("/api/v1/files/", s.file)
 	return s.auth(mux)
@@ -66,6 +81,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"catalog_discovery":         true,
 			"catalog_etag":              true,
 			"catalog_rebuild":           s.token != "",
+			"library_editing":           s.token != "" && s.configPath != "",
 		},
 	})
 }
@@ -110,6 +126,67 @@ func (s *Server) rebuildCatalog(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"catalog_etag": s.catalog.Revision(),
+		"systems":      s.catalog.Systems(),
+		"libraries":    s.catalog.Libraries(),
+	})
+}
+
+func (s *Server) replaceLibraries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w, http.MethodPut)
+		return
+	}
+	if s.token == "" || s.configPath == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "library editing is disabled without managed config and bearer token",
+		})
+		return
+	}
+
+	var request struct {
+		Libraries []config.Library `json:"libraries"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid library configuration"})
+		return
+	}
+	if decoder.More() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid library configuration"})
+		return
+	}
+
+	s.adminMu.Lock()
+	defer s.adminMu.Unlock()
+
+	next := s.cfg
+	libraries, err := config.NormalizeLibraries(request.Libraries)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	next.Libraries = libraries
+
+	// Build the complete replacement catalog before mutating persistent or live
+	// state. A bad path or scan therefore cannot partially replace a working
+	// configuration.
+	prepared, err := catalog.New(next)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "library scan failed"})
+		return
+	}
+	if err := config.Save(s.configPath, next); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save configuration failed"})
+		return
+	}
+
+	s.catalog.ReplaceFrom(prepared)
+	s.cfg = next
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"catalog_etag": s.catalog.Revision(),
