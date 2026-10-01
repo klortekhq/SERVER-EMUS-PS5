@@ -50,6 +50,53 @@ func TestRangeRead(t *testing.T) {
 	}
 }
 
+func TestTransportMetricsCountRangeTraffic(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	rangeReq := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	rangeReq.Header.Set("Range", "bytes=2-5")
+	rangeRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rangeRec, rangeReq)
+	if rangeRec.Code != http.StatusPartialContent {
+		t.Fatalf("range status=%d body=%s", rangeRec.Code, rangeRec.Body.String())
+	}
+
+	headReq := httptest.NewRequest(http.MethodHead, "/api/v1/files/"+entry.ID, nil)
+	headRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(headRec, headReq)
+	if headRec.Code != http.StatusOK {
+		t.Fatalf("HEAD status=%d", headRec.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("metrics status=%d body=%s", metricsRec.Code, metricsRec.Body.String())
+	}
+
+	for _, want := range []string{
+		`"file_get_requests":1`,
+		`"file_head_requests":1`,
+		`"range_requests":1`,
+		`"full_get_requests":0`,
+		`"bytes_served":4`,
+		`"not_found":0`,
+		`"errors":0`,
+	} {
+		if !strings.Contains(metricsRec.Body.String(), want) {
+			t.Fatalf("metrics response missing %s: %s", want, metricsRec.Body.String())
+		}
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(healthRec, healthReq)
+	if !strings.Contains(healthRec.Body.String(), `"transport_metrics":true`) {
+		t.Fatalf("health did not advertise metrics: %s", healthRec.Body.String())
+	}
+}
+
 func TestHeadAndCatalogDoNotExposeHostPath(t *testing.T) {
 	server, entry := testServer(t, "")
 
