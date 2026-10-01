@@ -10,7 +10,7 @@ El protocolo de transporte de SERVER-EMUS-PS5 es HTTP/1.1 deliberadamente
 simple. Los clientes nativos pueden representar un archivo remoto con este URI:
 
 ~~~text
-emus://192.168.1.50:8787/<file-id>
+emus://192.168.1.50:8787/<file-id>/Juego.chd
 ~~~
 
 ps5rt lo traduce internamente a:
@@ -19,7 +19,7 @@ ps5rt lo traduce internamente a:
 http://192.168.1.50:8787/api/v1/files/<file-id>
 ~~~
 
-El ID procede del catálogo y no contiene la ruta física del servidor.
+El ID procede del catálogo y no contiene la ruta física del servidor. El sufijo de nombre es metadato para conservar la extensión que necesita el emulador; `ps5rt` no lo usa para resolver el archivo en el servidor.
 
 ### Descubrimiento
 
@@ -105,7 +105,7 @@ SERVER-EMUS-PS5 deliberately uses a small HTTP/1.1 transport. Native clients
 may represent a remote file with:
 
 ~~~text
-emus://192.168.1.50:8787/<file-id>
+emus://192.168.1.50:8787/<file-id>/Juego.chd
 ~~~
 
 ps5rt translates it internally to:
@@ -114,7 +114,7 @@ ps5rt translates it internally to:
 http://192.168.1.50:8787/api/v1/files/<file-id>
 ~~~
 
-The ID comes from the catalog and does not expose a physical server path.
+The ID comes from the catalog and does not expose a physical server path. The trailing file name is metadata used to preserve the extension expected by emulator cores; `ps5rt` never uses it to resolve the host file.
 
 ### Discovery
 
