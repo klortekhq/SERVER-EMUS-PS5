@@ -95,6 +95,7 @@ En Windows el mismo campo puede ser, por ejemplo:
 - GET /api/v1/health
 - GET /api/v1/systems
 - GET /api/v1/libraries
+- POST /api/v1/catalog/rebuild
 - GET /api/v1/games?system=ps1
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
@@ -105,6 +106,10 @@ opcional de `emus://host/id/ruta` se usa como ruta virtual relativa para
 sidecars del descriptor. El servidor la resuelve dentro de la misma biblioteca
 y rechaza escapes, incluidos los producidos por symlinks. El cliente nunca
 puede solicitar una ruta física arbitraria del host.
+
+El rescan administrativo `POST /api/v1/catalog/rebuild` vuelve a indexar las
+carpetas configuradas sin reiniciar el proceso. Por seguridad, este endpoint
+solo se habilita cuando hay un token configurado.
 
 Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -232,8 +237,13 @@ Portable-build run **36839534917** produces six standalone artifacts:
 - macOS amd64
 - macOS arm64
 
-The read-only, path-free library metadata API is implemented. The remaining
-MVP management work is the authenticated library-editing UI/API, physical-PS5
+The read-only, path-free library metadata API is implemented. An authenticated
+`POST /api/v1/catalog/rebuild` can rescan configured libraries without
+restarting the server; the administrative endpoint is disabled unless a bearer
+token is configured.
+
+The remaining MVP management work is the authenticated library-editing UI/API,
+physical-PS5
 `emus://` validation, reconnect/prefetch tuning and real LAN benchmarks
 against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
