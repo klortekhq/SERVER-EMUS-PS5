@@ -28,7 +28,8 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag` y
 `catalog_rebuild`.
 
-`catalog_rebuild` solo es `true` cuando hay bearer token configurado. El
+`catalog_rebuild` solo es `true` cuando hay bearer token configurado.
+`library_editing` requiere además un archivo de configuración gestionable. El
 cliente PS5 debe negociar estas capacidades en lugar de asumir extensiones por
 el puerto o el nombre del servicio.
 
@@ -60,6 +61,37 @@ emus://192.168.1.50:8787/<cue-id>/Juego.cue
 ~~~
 
 Si el CUE abre `tracks/track01.bin`, el VFS conserva el mismo ID ancla y solicita virtualmente `tracks/track01.bin`. El servidor resuelve esa ruta desde el directorio del CUE y rechaza cualquier resolución que salga de la biblioteca, también a través de symlinks. El mismo mecanismo cubre listas M3U y formatos con archivos compañeros.
+
+### Administración de bibliotecas
+
+Cuando `capabilities.library_editing` es `true`, una herramienta de
+administración autenticada puede reemplazar la lista completa:
+
+~~~http
+PUT /api/v1/admin/libraries
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "libraries": [
+    {
+      "name": "PS1",
+      "system": "ps1",
+      "path": "/mnt/user/Multimedia/RomsRVK/PS1",
+      "recursive": true,
+      "extensions": [".cue", ".chd", ".m3u"]
+    }
+  ]
+}
+~~~
+
+Las rutas físicas solo existen en la petición administrativa y en el
+`config.json` local. La respuesta contiene únicamente estadísticas seguras
+de bibliotecas/sistemas y el nuevo `catalog_etag`.
+
+La operación es de sustitución completa: todas las carpetas se validan y
+preindexan antes de reemplazar el catálogo vivo. Una petición inválida no
+cambia ni el catálogo activo ni la configuración persistida.
 
 ### Apertura
 
@@ -143,8 +175,9 @@ The ID comes from the catalog and does not expose a physical server path. The tr
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`, and
 `catalog_rebuild`.
 
-`catalog_rebuild` is true only when a bearer token is configured. PS5 clients
-should negotiate these capabilities instead of assuming optional extensions
+`catalog_rebuild` is true only when a bearer token is configured.
+`library_editing` additionally requires a managed configuration path. PS5
+clients should negotiate these capabilities instead of assuming optional extensions
 from the port or service name.
 
 
@@ -158,6 +191,20 @@ Game entries expose only catalog metadata and never the host physical path. Conf
 ### Virtual paths and sidecars
 
 A descriptor keeps one opaque anchor ID. Relative files requested by the emulator are forwarded as virtual paths under that anchor. The server resolves them from the descriptor directory and rejects targets that escape the configured library, including symlink escapes. This supports multi-file and multi-disc layouts without adding sidecar files to the games catalog.
+
+### Library administration
+
+When `capabilities.library_editing` is `true`, an authenticated management
+client may replace the complete library set with
+`PUT /api/v1/admin/libraries`.
+
+Physical paths exist only in that authenticated request and in the local
+`config.json`. Responses contain only path-free library/system statistics and
+the new `catalog_etag`.
+
+The operation is a complete replacement: every folder is validated and a full
+replacement catalog is prepared before the live catalog changes. Invalid
+requests leave both the active catalog and persisted configuration unchanged.
 
 ### Open
 
