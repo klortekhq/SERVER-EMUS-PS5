@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -26,6 +25,7 @@ type Entry struct {
 	ModifiedAt   time.Time `json:"modified_at"`
 	ETag         string    `json:"etag"`
 	HostPath     string    `json:"-"`
+	LibraryRoot  string    `json:"-"`
 }
 
 type SystemStat struct {
@@ -37,7 +37,6 @@ type Catalog struct {
 	mu      sync.RWMutex
 	cfg     config.Config
 	entries map[string]Entry
-	paths   map[string]string
 	systems map[string]int
 }
 
@@ -51,18 +50,16 @@ func New(cfg config.Config) (*Catalog, error) {
 
 func (c *Catalog) Rebuild() error {
 	entries := make(map[string]Entry)
-	paths := make(map[string]string)
 	systems := make(map[string]int)
 
 	for _, lib := range c.cfg.Libraries {
-		if err := scanLibrary(lib, entries, paths, systems); err != nil {
+		if err := scanLibrary(lib, entries, systems); err != nil {
 			return err
 		}
 	}
 
 	c.mu.Lock()
 	c.entries = entries
-	c.paths = paths
 	c.systems = systems
 	c.mu.Unlock()
 	return nil
@@ -71,7 +68,6 @@ func (c *Catalog) Rebuild() error {
 func scanLibrary(
 	lib config.Library,
 	entries map[string]Entry,
-	paths map[string]string,
 	systems map[string]int,
 ) error {
 	allowed := make(map[string]struct{}, len(lib.Extensions))
@@ -129,15 +125,11 @@ func scanLibrary(
 			ModifiedAt:   info.ModTime().UTC(),
 			ETag:         etag,
 			HostPath:     filePath,
+			LibraryRoot:  lib.Path,
 		}
-		paths[pathKey(lib.Name, rel)] = id
 		systems[lib.System]++
 		return nil
 	})
-}
-
-func pathKey(library, relative string) string {
-	return library + "\x00" + filepath.ToSlash(relative)
 }
 
 func stableID(library, system, relative string) string {
@@ -163,11 +155,11 @@ func (c *Catalog) Get(id string) (Entry, bool) {
 //
 // This lets descriptor formats such as CUE/CCD/TOC/M3U keep using ordinary
 // relative sidecar paths while the PS5 only carries one opaque catalog ID.
+// Sidecars do not need to be launchable/catalogued extensions; they are
+// resolved from disk only after proving the target remains inside the same
+// configured library (including after symlink resolution).
 func (c *Catalog) ResolveFromAnchor(anchorID, virtualPath string) (Entry, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	anchor, ok := c.entries[anchorID]
+	anchor, ok := c.Get(anchorID)
 	if !ok {
 		return Entry{}, false
 	}
@@ -178,23 +170,51 @@ func (c *Catalog) ResolveFromAnchor(anchorID, virtualPath string) (Entry, bool) 
 		return Entry{}, false
 	}
 
+	// Descriptor paths use slash semantics even when the server runs on
+	// Windows. Convert them only after rejecting absolute virtual paths.
 	virtualPath = strings.ReplaceAll(virtualPath, "\\", "/")
-	if path.IsAbs(virtualPath) {
+	if strings.HasPrefix(virtualPath, "/") {
 		return Entry{}, false
 	}
 
-	base := path.Dir(anchor.RelativePath)
-	resolved := path.Clean(path.Join(base, virtualPath))
-	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
+	root, err := filepath.EvalSymlinks(anchor.LibraryRoot)
+	if err != nil {
+		return Entry{}, false
+	}
+	target := filepath.Clean(filepath.Join(
+		filepath.Dir(anchor.HostPath),
+		filepath.FromSlash(virtualPath),
+	))
+	target, err = filepath.EvalSymlinks(target)
+	if err != nil {
 		return Entry{}, false
 	}
 
-	id, ok := c.paths[pathKey(anchor.Library, resolved)]
-	if !ok {
+	relative, err := filepath.Rel(root, target)
+	if err != nil || filepath.IsAbs(relative) ||
+		relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return Entry{}, false
 	}
-	entry, ok := c.entries[id]
-	return entry, ok
+
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return Entry{}, false
+	}
+
+	relative = filepath.ToSlash(relative)
+	return Entry{
+		ID:           stableID(anchor.Library, anchor.System, relative),
+		Library:      anchor.Library,
+		System:       anchor.System,
+		Name:         filepath.Base(target),
+		RelativePath: relative,
+		Size:         info.Size(),
+		ModifiedAt:   info.ModTime().UTC(),
+		ETag:         metadataETag(info.Size(), info.ModTime()),
+		HostPath:     target,
+		LibraryRoot:  root,
+	}, true
 }
 
 func (c *Catalog) Entries(system string) []Entry {
