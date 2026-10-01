@@ -19,8 +19,8 @@ func TestWizardCreatesPortableConfig(t *testing.T) {
 		"My PS1",
 		root,
 		"y",
-		"8787",
 		"",
+		"8787",
 		"",
 	}, "\n")
 
