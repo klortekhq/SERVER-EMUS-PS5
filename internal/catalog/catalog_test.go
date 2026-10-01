@@ -61,7 +61,7 @@ func TestResolveFromAnchorKeepsSidecarsInsideLibrary(t *testing.T) {
 		System:     "ps1",
 		Path:       root,
 		Recursive:  true,
-		Extensions: []string{".cue", ".bin"},
+		Extensions: []string{".cue"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +76,10 @@ func TestResolveFromAnchorKeepsSidecarsInsideLibrary(t *testing.T) {
 	}
 	if cue.ID == "" {
 		t.Fatal("cue anchor not catalogued")
+	}
+
+	if got := len(cat.Entries("ps1")); got != 1 {
+		t.Fatalf("sidecars leaked into launchable catalog: got %d entries", got)
 	}
 
 	track, ok := cat.ResolveFromAnchor(cue.ID, "tracks/track01.bin")
