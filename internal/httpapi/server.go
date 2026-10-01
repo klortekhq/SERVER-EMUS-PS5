@@ -67,17 +67,23 @@ func NewManaged(cat *catalog.Catalog, cfg config.Config, configPath string) *Ser
 }
 
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/health", s.health)
-	mux.HandleFunc("/api/v1/metrics", s.transportMetrics)
-	mux.HandleFunc("/api/v1/admin/metrics/reset", s.resetTransportMetrics)
-	mux.HandleFunc("/api/v1/systems", s.systems)
-	mux.HandleFunc("/api/v1/libraries", s.libraries)
-	mux.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
-	mux.HandleFunc("/api/v1/admin/libraries", s.replaceLibraries)
-	mux.HandleFunc("/api/v1/games", s.games)
-	mux.HandleFunc("/api/v1/files/", s.file)
-	return s.auth(mux)
+	api := http.NewServeMux()
+	api.HandleFunc("/api/v1/health", s.health)
+	api.HandleFunc("/api/v1/metrics", s.transportMetrics)
+	api.HandleFunc("/api/v1/admin/metrics/reset", s.resetTransportMetrics)
+	api.HandleFunc("/api/v1/systems", s.systems)
+	api.HandleFunc("/api/v1/libraries", s.libraries)
+	api.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
+	api.HandleFunc("/api/v1/admin/libraries", s.replaceLibraries)
+	api.HandleFunc("/api/v1/games", s.games)
+	api.HandleFunc("/api/v1/files/", s.file)
+
+	root := http.NewServeMux()
+	root.HandleFunc("/", s.adminRoot)
+	root.HandleFunc("/admin", s.adminPage)
+	root.HandleFunc("/admin/", s.adminPage)
+	root.Handle("/api/", s.auth(api))
+	return root
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -118,6 +124,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"library_editing":           s.token != "" && s.configPath != "",
 			"transport_metrics":          true,
 			"transport_metrics_reset":    s.token != "",
+			"web_admin":                  true,
 		},
 	})
 }
