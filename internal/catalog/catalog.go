@@ -185,6 +185,32 @@ func (c *Catalog) Revision() string {
 	return c.revision
 }
 
+func (c *Catalog) ReplaceFrom(next *Catalog) {
+	if next == nil || next == c {
+		return
+	}
+
+	next.mu.RLock()
+	cfg := next.cfg
+	entries := make(map[string]Entry, len(next.entries))
+	for id, entry := range next.entries {
+		entries[id] = entry
+	}
+	systems := make(map[string]int, len(next.systems))
+	for system, count := range next.systems {
+		systems[system] = count
+	}
+	revision := next.revision
+	next.mu.RUnlock()
+
+	c.mu.Lock()
+	c.cfg = cfg
+	c.entries = entries
+	c.systems = systems
+	c.revision = revision
+	c.mu.Unlock()
+}
+
 func stableID(library, system, relative string) string {
 	sum := sha256.Sum256([]byte(library + "\x00" + system + "\x00" + filepath.ToSlash(relative)))
 	return hex.EncodeToString(sum[:])
