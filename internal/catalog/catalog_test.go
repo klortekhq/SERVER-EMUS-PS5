@@ -103,8 +103,12 @@ func TestConcurrentRebuildCannotRestoreReplacedLibraries(t *testing.T) {
 	if err := cat.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	expectedNewGame, err := filepath.EvalSymlinks(newGame)
+	if err != nil {
+		t.Fatal(err)
+	}
 	entries := cat.Entries("")
-	if len(entries) != 1 || entries[0].HostPath != newGame || entries[0].System != "ps2" {
+	if len(entries) != 1 || entries[0].HostPath != expectedNewGame || entries[0].System != "ps2" {
 		t.Fatalf("stale rebuild restored replaced libraries: %+v", entries)
 	}
 }
