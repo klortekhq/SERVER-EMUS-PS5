@@ -168,7 +168,7 @@ func (s *Server) replaceLibraries(w http.ResponseWriter, r *http.Request) {
 	next := s.cfg
 	libraries, err := config.NormalizeLibraries(request.Libraries)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid library configuration"})
 		return
 	}
 	next.Libraries = libraries
