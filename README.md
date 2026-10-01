@@ -94,6 +94,7 @@ En Windows el mismo campo puede ser, por ejemplo:
 
 - GET /api/v1/health
 - GET /api/v1/metrics
+- POST /api/v1/admin/metrics/reset
 - GET /api/v1/systems
 - GET /api/v1/libraries
 - POST /api/v1/catalog/rebuild
@@ -130,7 +131,8 @@ mismo ETag.
 uptime, GET/HEAD de archivos, peticiones Range, GET completos, sidecars, bytes
 servidos, 404 y errores. Está pensado para medir patrones reales de emulación y
 comparar read-ahead/cache/EMUS frente a SMB antes de afirmar mejoras de
-rendimiento.
+rendimiento. Con bearer token, `POST /api/v1/admin/metrics/reset` pone los
+contadores a cero para iniciar una prueba independiente.
 
 Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -276,7 +278,8 @@ when nothing relevant changed.
 The authenticated library-editing API is implemented with pre-validation,
 persistent config replacement and live catalog swapping. Path-free transport
 metrics are also implemented and green across CI/portable builds, giving
-physical-PS5 tests counters for Range requests and transferred bytes. The
+physical-PS5 tests counters for Range requests and transferred bytes. An
+authenticated metrics reset starts each benchmark from zero. The
 remaining management work is the UI/WebUI for that API, physical-PS5
 `emus://` validation, measured prefetch tuning and real LAN benchmarks
 against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
