@@ -445,6 +445,9 @@ func TestManagedLibraryReplacementRejectsInvalidPathWithoutMutation(t *testing.T
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), missing) {
+		t.Fatal("invalid library response leaked physical path")
+	}
 	if cat.Revision() != revision || len(cat.Entries("ps1")) != 1 {
 		t.Fatal("invalid library request mutated live catalog")
 	}
