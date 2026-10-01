@@ -102,7 +102,7 @@ func TestCatalogConditionalCaching(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(cat, "secret")
+	server := New(cat, "")
 
 	first := httptest.NewRequest(http.MethodGet, "/api/v1/games?system=ps1", nil)
 	firstRec := httptest.NewRecorder()
