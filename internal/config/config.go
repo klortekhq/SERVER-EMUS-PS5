@@ -33,58 +33,82 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
+	return Normalize(cfg)
+}
+
+func Normalize(cfg Config) (Config, error) {
 	if strings.TrimSpace(cfg.Listen) == "" {
 		cfg.Listen = "0.0.0.0:8787"
 	}
-	if len(cfg.Libraries) == 0 {
-		return cfg, errors.New("at least one library is required")
+	cfg.Token = strings.TrimSpace(cfg.Token)
+
+	libraries, err := NormalizeLibraries(cfg.Libraries)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Libraries = libraries
+	return cfg, nil
+}
+
+func NormalizeLibraries(libraries []Library) ([]Library, error) {
+	if len(libraries) == 0 {
+		return nil, errors.New("at least one library is required")
 	}
 
-	seen := make(map[string]struct{}, len(cfg.Libraries))
-	for i := range cfg.Libraries {
-		lib := &cfg.Libraries[i]
+	out := append([]Library(nil), libraries...)
+	seen := make(map[string]struct{}, len(out))
+	for i := range out {
+		lib := &out[i]
 		lib.Name = strings.TrimSpace(lib.Name)
 		lib.System = strings.ToLower(strings.TrimSpace(lib.System))
-		lib.Path = strings.TrimSpace(lib.Path)
+		lib.Path = strings.Trim(strings.TrimSpace(lib.Path), "\"")
 		if lib.Name == "" {
-			return cfg, fmt.Errorf("library %d: name is required", i)
+			return nil, fmt.Errorf("library %d: name is required", i)
 		}
 		if lib.System == "" {
-			return cfg, fmt.Errorf("library %q: system is required", lib.Name)
+			return nil, fmt.Errorf("library %q: system is required", lib.Name)
 		}
 		if lib.Path == "" {
-			return cfg, fmt.Errorf("library %q: path is required", lib.Name)
+			return nil, fmt.Errorf("library %q: path is required", lib.Name)
 		}
 		if _, ok := seen[lib.Name]; ok {
-			return cfg, fmt.Errorf("duplicate library name %q", lib.Name)
+			return nil, fmt.Errorf("duplicate library name %q", lib.Name)
 		}
 		seen[lib.Name] = struct{}{}
 
 		abs, err := filepath.Abs(lib.Path)
 		if err != nil {
-			return cfg, fmt.Errorf("library %q: resolve path: %w", lib.Name, err)
+			return nil, fmt.Errorf("library %q: resolve path: %w", lib.Name, err)
 		}
 		info, err := os.Stat(abs)
 		if err != nil {
-			return cfg, fmt.Errorf("library %q: stat path: %w", lib.Name, err)
+			return nil, fmt.Errorf("library %q: stat path: %w", lib.Name, err)
 		}
 		if !info.IsDir() {
-			return cfg, fmt.Errorf("library %q: path is not a directory", lib.Name)
+			return nil, fmt.Errorf("library %q: path is not a directory", lib.Name)
 		}
 		lib.Path = filepath.Clean(abs)
 
-		for j, ext := range lib.Extensions {
+		extensions := make([]string, 0, len(lib.Extensions))
+		extSeen := make(map[string]struct{}, len(lib.Extensions))
+		for _, ext := range lib.Extensions {
 			ext = strings.ToLower(strings.TrimSpace(ext))
-			if ext != "" && !strings.HasPrefix(ext, ".") {
+			if ext == "" {
+				continue
+			}
+			if !strings.HasPrefix(ext, ".") {
 				ext = "." + ext
 			}
-			lib.Extensions[j] = ext
+			if _, ok := extSeen[ext]; ok {
+				continue
+			}
+			extSeen[ext] = struct{}{}
+			extensions = append(extensions, ext)
 		}
+		lib.Extensions = extensions
 	}
-
-	return cfg, nil
+	return out, nil
 }
-
 
 func Save(path string, cfg Config) error {
 	if strings.TrimSpace(path) == "" {
