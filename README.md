@@ -96,6 +96,7 @@ En Windows el mismo campo puede ser, por ejemplo:
 - GET /api/v1/systems
 - GET /api/v1/libraries
 - POST /api/v1/catalog/rebuild
+- PUT /api/v1/admin/libraries
 - GET /api/v1/games?system=ps1
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
@@ -110,6 +111,13 @@ puede solicitar una ruta física arbitraria del host.
 El rescan administrativo `POST /api/v1/catalog/rebuild` vuelve a indexar las
 carpetas configuradas sin reiniciar el proceso. Por seguridad, este endpoint
 solo se habilita cuando hay un token configurado.
+
+`PUT /api/v1/admin/libraries` reemplaza la lista completa de bibliotecas sin
+reiniciar. También exige bearer token y que el servidor haya arrancado con un
+archivo de configuración gestionable. Antes de guardar nada valida todas las
+carpetas, construye un catálogo de sustitución y solo después persiste
+`config.json` y cambia el catálogo vivo. Las respuestas administrativas nunca
+incluyen las rutas físicas.
 
 Los endpoints de catálogo publican además un `ETag` estable. La PS5 o una UI
 pueden enviar `If-None-Match` a `/systems`, `/libraries` o `/games`; si
@@ -197,6 +205,8 @@ See config.example.json. Paths use the host operating system's native path synta
 - GET /api/v1/health
 - GET /api/v1/systems
 - GET /api/v1/libraries
+- POST /api/v1/catalog/rebuild
+- PUT /api/v1/admin/libraries
 - GET /api/v1/games?system=ps1
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
@@ -255,8 +265,9 @@ body. The revision is derived only from client-visible library metadata and game
 metadata, not physical NAS paths. Periodic rescans therefore keep the same ETag
 when nothing relevant changed.
 
-The remaining MVP management work is the authenticated library-editing UI/API,
-physical-PS5
+The authenticated library-editing API is implemented with pre-validation,
+persistent config replacement and live catalog swapping. The remaining
+management work is the UI/WebUI for that API, physical-PS5
 `emus://` validation, reconnect/prefetch tuning and real LAN benchmarks
 against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
