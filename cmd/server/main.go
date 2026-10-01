@@ -40,7 +40,7 @@ func main() {
 		log.Fatalf("catalog: %v", err)
 	}
 
-	api := httpapi.New(cat, cfg.Token)
+	api := httpapi.NewManaged(cat, cfg, *configPath)
 	server := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           api.Handler(),
