@@ -165,8 +165,16 @@ Devuelve contadores acumulados desde el arranque:
 - `full_get_requests`;
 - `sidecar_requests`;
 - `bytes_served`;
+- `range_bytes_served`;
+- `full_get_bytes_served`;
+- `file_request_duration_us_total`;
+- `file_request_duration_us_max`;
 - `not_found`;
 - `errors`.
+
+La latencia media de archivo para una muestra se calcula como
+`file_request_duration_us_total / (file_get_requests + file_head_requests)`
+cuando el denominador es distinto de cero.
 
 No incluye IDs de juegos, nombres ni rutas físicas. Su objetivo es comparar
 patrones y coste de transporte antes/después de read-ahead o caché y durante
@@ -323,8 +331,13 @@ GET /api/v1/metrics
 ~~~
 
 The endpoint exposes cumulative counters since process start: uptime, file
-GET/HEAD requests, Range requests, full GETs, sidecar requests, bytes served,
-404s and errors. It contains no game IDs, names or physical paths.
+GET/HEAD requests, Range requests, full GETs, sidecar requests, total bytes,
+Range/full-GET bytes, cumulative/max file-request latency in microseconds, 404s
+and errors. It contains no game IDs, names or physical paths.
+
+Average file-request latency for a sample is
+`file_request_duration_us_total / (file_get_requests + file_head_requests)`
+when the denominator is non-zero.
 
 These counters are intended to quantify request/byte behavior before and after
 read-ahead/cache changes and during EMUS-vs-SMB benchmarks.
