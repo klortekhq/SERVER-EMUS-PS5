@@ -26,7 +26,7 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 `GET /api/v1/health` devuelve `service`, `api` y un bloque
 `capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
-`catalog_rebuild`, `transport_metrics` y, cuando hay token,
+`catalog_rebuild`, `transport_metrics`, `web_admin` y, cuando hay token,
 `transport_metrics_reset`.
 
 `catalog_rebuild` solo es `true` cuando hay bearer token configurado.
@@ -62,6 +62,26 @@ emus://192.168.1.50:8787/<cue-id>/Juego.cue
 ~~~
 
 Si el CUE abre `tracks/track01.bin`, el VFS conserva el mismo ID ancla y solicita virtualmente `tracks/track01.bin`. El servidor resuelve esa ruta desde el directorio del CUE y rechaza cualquier resolución que salga de la biblioteca, también a través de symlinks. El mismo mecanismo cubre listas M3U y formatos con archivos compañeros.
+
+### WebUI administrativa
+
+~~~http
+GET /admin/
+~~~
+
+La WebUI es una shell HTML/JS estática integrada en el binario. No recibe ni
+inyecta el token del servidor y no contiene rutas físicas. Puede cargarse sin
+Authorization incluso cuando la API está protegida.
+
+Si el servidor requiere bearer token, el administrador lo introduce en la
+página. El navegador lo conserva únicamente en `sessionStorage` de la pestaña
+y lo añade como cabecera `Authorization` a las llamadas `/api/`. Cerrar la
+pestaña elimina ese almacenamiento de sesión.
+
+La disponibilidad pública del HTML **no** relaja la autenticación de la API:
+`/api/` sigue pasando por el mismo middleware bearer. La respuesta añade CSP,
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff` y
+`Referrer-Policy: no-referrer`.
 
 ### Administración de bibliotecas
 
@@ -206,8 +226,8 @@ The ID comes from the catalog and does not expose a physical server path. The tr
 `GET /api/v1/health` returns `service`, `api`, and a
 `capabilities` object. v1 explicitly advertises `byte_ranges`,
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
-`catalog_rebuild`, `transport_metrics`, and, when a token is configured,
-`transport_metrics_reset`.
+`catalog_rebuild`, `transport_metrics`, `web_admin`, and, when a token is
+configured, `transport_metrics_reset`.
 
 `catalog_rebuild` is true only when a bearer token is configured.
 `library_editing` additionally requires a managed configuration path. PS5
@@ -225,6 +245,26 @@ Game entries expose only catalog metadata and never the host physical path. Conf
 ### Virtual paths and sidecars
 
 A descriptor keeps one opaque anchor ID. Relative files requested by the emulator are forwarded as virtual paths under that anchor. The server resolves them from the descriptor directory and rejects targets that escape the configured library, including symlink escapes. This supports multi-file and multi-disc layouts without adding sidecar files to the games catalog.
+
+### Administration WebUI
+
+~~~http
+GET /admin/
+~~~
+
+The WebUI is a dependency-free static HTML/JS shell embedded in the server
+binary. It receives no server-side token and contains no physical host paths.
+The HTML itself remains loadable when API authentication is enabled.
+
+When a bearer token is configured, the administrator enters it in the page.
+The browser keeps it only in the tab's `sessionStorage` and attaches it as the
+normal `Authorization` header to `/api/` requests. Closing the tab drops that
+session storage.
+
+Serving the shell publicly does **not** relax API authentication: every
+`/api/` route still passes through the same bearer middleware. The shell is
+served with CSP, `Cache-Control: no-store`, `nosniff` and a no-referrer
+policy.
 
 ### Library administration
 
