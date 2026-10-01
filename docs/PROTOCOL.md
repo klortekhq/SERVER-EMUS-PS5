@@ -23,6 +23,16 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 
 ### Descubrimiento
 
+`GET /api/v1/health` devuelve `service`, `api` y un bloque
+`capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
+`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag` y
+`catalog_rebuild`.
+
+`catalog_rebuild` solo es `true` cuando hay bearer token configurado. El
+cliente PS5 debe negociar estas capacidades en lugar de asumir extensiones por
+el puerto o el nombre del servicio.
+
+
 ~~~http
 GET /api/v1/systems
 GET /api/v1/games?system=ps1
@@ -127,6 +137,16 @@ http://192.168.1.50:8787/api/v1/files/<file-id>
 The ID comes from the catalog and does not expose a physical server path. The trailing suffix is a **virtual relative path** anchored at that catalog entry's directory. `ps5rt` transports it encoded and the server resolves it only inside the same configured library. This allows CUE/CCD/TOC/M3U content to open relative BIN/IMG/SUB/disc sidecars without SMB or NAS host paths.
 
 ### Discovery
+
+`GET /api/v1/health` returns `service`, `api`, and a
+`capabilities` object. v1 explicitly advertises `byte_ranges`,
+`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`, and
+`catalog_rebuild`.
+
+`catalog_rebuild` is true only when a bearer token is configured. PS5 clients
+should negotiate these capabilities instead of assuming optional extensions
+from the port or service name.
+
 
 ~~~http
 GET /api/v1/systems
