@@ -111,6 +111,12 @@ El rescan administrativo `POST /api/v1/catalog/rebuild` vuelve a indexar las
 carpetas configuradas sin reiniciar el proceso. Por seguridad, este endpoint
 solo se habilita cuando hay un token configurado.
 
+Los endpoints de catálogo publican además un `ETag` estable. La PS5 o una UI
+pueden enviar `If-None-Match` a `/systems`, `/libraries` o `/games`; si
+nada cambió el servidor responde `304 Not Modified` sin reenviar el JSON. La
+revisión no contiene rutas físicas del NAS y un rescan sin cambios conserva el
+mismo ETag.
+
 Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ### Ejecutar
@@ -241,6 +247,13 @@ The read-only, path-free library metadata API is implemented. An authenticated
 `POST /api/v1/catalog/rebuild` can rescan configured libraries without
 restarting the server; the administrative endpoint is disabled unless a bearer
 token is configured.
+
+The catalog discovery endpoints also publish a stable `ETag`. Clients may send
+`If-None-Match` to `/api/v1/systems`, `/api/v1/libraries` or
+`/api/v1/games`; unchanged catalogs return `304 Not Modified` with no JSON
+body. The revision is derived only from client-visible library metadata and game
+metadata, not physical NAS paths. Periodic rescans therefore keep the same ETag
+when nothing relevant changed.
 
 The remaining MVP management work is the authenticated library-editing UI/API,
 physical-PS5
