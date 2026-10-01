@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -331,5 +332,127 @@ func TestAnchoredSidecarRead(t *testing.T) {
 	server.Handler().ServeHTTP(escapeRec, escape)
 	if escapeRec.Code != http.StatusNotFound {
 		t.Fatalf("escape status=%d want 404", escapeRec.Code)
+	}
+}
+
+
+func TestManagedLibraryReplacementPersistsWithoutLeakingPaths(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root1, "old.chd"), []byte("OLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root2, "new.chd"), []byte("NEW"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Normalize(config.Config{
+		Listen: "127.0.0.1:8787",
+		Token:  "secret",
+		Libraries: []config.Library{{
+			Name: "OLD", System: "ps1", Path: root1, Recursive: true, Extensions: []string{".chd"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewManaged(cat, cfg, configPath)
+
+	body := `{"libraries":[{"name":"NEW","system":"dreamcast","path":` + strconv.Quote(root2) + `,"recursive":true,"extensions":["chd","CHD"]}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/libraries", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), root1) || strings.Contains(rec.Body.String(), root2) {
+		t.Fatal("admin response leaked physical library path")
+	}
+	if got := cat.Entries("ps1"); len(got) != 0 {
+		t.Fatalf("old catalog still active: %d entries", len(got))
+	}
+	if got := cat.Entries("dreamcast"); len(got) != 1 || got[0].Name != "new.chd" {
+		t.Fatalf("replacement catalog mismatch: %+v", got)
+	}
+
+	saved, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Libraries) != 1 || saved.Libraries[0].Name != "NEW" ||
+		saved.Libraries[0].Path != filepath.Clean(root2) {
+		t.Fatalf("persisted config mismatch: %+v", saved.Libraries)
+	}
+	if len(saved.Libraries[0].Extensions) != 1 || saved.Libraries[0].Extensions[0] != ".chd" {
+		t.Fatalf("extensions were not normalized/deduplicated: %+v", saved.Libraries[0].Extensions)
+	}
+
+	health := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	health.Header.Set("Authorization", "Bearer secret")
+	healthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(healthRec, health)
+	if !strings.Contains(healthRec.Body.String(), `"library_editing":true`) {
+		t.Fatalf("managed server did not advertise library editing: %s", healthRec.Body.String())
+	}
+}
+
+func TestManagedLibraryReplacementRejectsInvalidPathWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "disc.chd"), []byte("DATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Normalize(config.Config{
+		Token: "secret",
+		Libraries: []config.Library{{
+			Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".chd"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := cat.Revision()
+	server := NewManaged(cat, cfg, configPath)
+
+	missing := filepath.Join(t.TempDir(), "missing")
+	body := `{"libraries":[{"name":"BAD","system":"ps1","path":` + strconv.Quote(missing) + `,"recursive":true}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/libraries", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if cat.Revision() != revision || len(cat.Entries("ps1")) != 1 {
+		t.Fatal("invalid library request mutated live catalog")
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("invalid library request mutated persisted config")
 	}
 }
