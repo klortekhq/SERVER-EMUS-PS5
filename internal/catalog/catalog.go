@@ -174,13 +174,6 @@ func scanLibrary(
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() {
-			info, infoErr := d.Info()
-			if infoErr != nil || !info.Mode().IsRegular() {
-				return nil
-			}
-		}
-
 		if len(allowed) != 0 {
 			if _, ok := allowed[strings.ToLower(filepath.Ext(d.Name()))]; !ok {
 				return nil
@@ -197,6 +190,9 @@ func scanLibrary(
 		info, err := os.Stat(resolvedPath)
 		if err != nil {
 			return fmt.Errorf("stat %q: %w", filePath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil
 		}
 		rel, err := filepath.Rel(resolvedRoot, filePath)
 		if err != nil {
