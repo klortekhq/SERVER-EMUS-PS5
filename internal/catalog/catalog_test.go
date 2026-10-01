@@ -2,9 +2,11 @@ package catalog
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/klortekhq/server-emus-ps5/internal/config"
@@ -37,6 +39,73 @@ func TestCatalogFiltersAndHidesHostPaths(t *testing.T) {
 	}
 	if entries[0].HostPath == "" {
 		t.Fatal("internal host path should exist inside catalog")
+	}
+}
+
+func TestConcurrentRebuildCannotRestoreReplacedLibraries(t *testing.T) {
+	oldRoot := t.TempDir()
+	for i := 0; i < 256; i++ {
+		name := filepath.Join(oldRoot, fmt.Sprintf("old-%03d.iso", i))
+		if err := os.WriteFile(name, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	newRoot := t.TempDir()
+	newGame := filepath.Join(newRoot, "new.chd")
+	if err := os.WriteFile(newGame, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldConfig := config.Config{Libraries: []config.Library{{
+		Name: "Old", System: "ps1", Path: oldRoot, Recursive: true, Extensions: []string{".iso"},
+	}}}
+	newConfig := config.Config{Libraries: []config.Library{{
+		Name: "New", System: "ps2", Path: newRoot, Recursive: true, Extensions: []string{".chd"},
+	}}}
+	cat, err := New(oldConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := New(newConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workerErrors := make(chan error, 24)
+	for i := 0; i < 24; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			if err := cat.Rebuild(); err != nil && err != errStaleRebuild {
+				workerErrors <- err
+			}
+		}()
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		<-start
+		for i := 0; i < 24; i++ {
+			cat.ReplaceFrom(replacement)
+		}
+	}()
+	close(start)
+	workers.Wait()
+	close(workerErrors)
+	for err := range workerErrors {
+		t.Errorf("unexpected concurrent rebuild error: %v", err)
+	}
+
+	if err := cat.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	entries := cat.Entries("")
+	if len(entries) != 1 || entries[0].HostPath != newGame || entries[0].System != "ps2" {
+		t.Fatalf("stale rebuild restored replaced libraries: %+v", entries)
 	}
 }
 

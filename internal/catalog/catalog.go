@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -95,11 +96,12 @@ type LibraryStat struct {
 }
 
 type Catalog struct {
-	mu       sync.RWMutex
-	cfg      config.Config
-	entries  map[string]Entry
-	systems  map[string]int
-	revision string
+	mu               sync.RWMutex
+	cfg              config.Config
+	configGeneration uint64
+	entries          map[string]Entry
+	systems          map[string]int
+	revision         string
 }
 
 func New(cfg config.Config) (*Catalog, error) {
@@ -111,23 +113,36 @@ func New(cfg config.Config) (*Catalog, error) {
 }
 
 func (c *Catalog) Rebuild() error {
+	// Rescans run in the background while administrators can replace the
+	// configured libraries. Build from a stable config snapshot and discard
+	// the result if a replacement won the race before publication.
+	c.mu.RLock()
+	cfg := c.cfg
+	generation := c.configGeneration
+	c.mu.RUnlock()
+
 	entries := make(map[string]Entry)
 	systems := make(map[string]int)
 
-	for _, lib := range c.cfg.Libraries {
+	for _, lib := range cfg.Libraries {
 		if err := scanLibrary(lib, entries, systems); err != nil {
 			return err
 		}
 	}
-	revision := catalogRevision(c.cfg, entries)
+	revision := catalogRevision(cfg, entries)
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.configGeneration != generation {
+		return errStaleRebuild
+	}
 	c.entries = entries
 	c.systems = systems
 	c.revision = revision
-	c.mu.Unlock()
 	return nil
 }
+
+var errStaleRebuild = errors.New("catalog configuration changed during rebuild; stale scan discarded")
 
 func scanLibrary(
 	lib config.Library,
@@ -266,6 +281,7 @@ func (c *Catalog) ReplaceFrom(next *Catalog) {
 
 	c.mu.Lock()
 	c.cfg = cfg
+	c.configGeneration++
 	c.entries = entries
 	c.systems = systems
 	c.revision = revision
