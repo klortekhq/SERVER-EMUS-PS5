@@ -357,6 +357,62 @@ func TestHealthCapabilities(t *testing.T) {
 	}
 }
 
+func TestAdminUIIsPublicShellWhileAPIStaysProtected(t *testing.T) {
+	server, entry := testServer(t, "secret")
+
+	rootReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	rootRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rootRec, rootReq)
+	if rootRec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("root status=%d want %d", rootRec.Code, http.StatusTemporaryRedirect)
+	}
+	if got := rootRec.Header().Get("Location"); got != "/admin/" {
+		t.Fatalf("root redirect=%q", got)
+	}
+
+	uiReq := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	uiRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(uiRec, uiReq)
+	if uiRec.Code != http.StatusOK {
+		t.Fatalf("admin status=%d body=%s", uiRec.Code, uiRec.Body.String())
+	}
+	body := uiRec.Body.String()
+	if !strings.Contains(body, "SERVER-EMUS-PS5") ||
+		!strings.Contains(body, "sessionStorage") ||
+		!strings.Contains(body, "/api/v1/admin/libraries") {
+		t.Fatalf("admin shell missing expected controls: %s", body)
+	}
+	if strings.Contains(body, "secret") ||
+		strings.Contains(body, entry.HostPath) ||
+		strings.Contains(body, filepath.Dir(entry.HostPath)) {
+		t.Fatal("admin shell leaked server secret or physical host path")
+	}
+	if got := uiRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("admin Cache-Control=%q", got)
+	}
+	if got := uiRec.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("admin shell missing CSP")
+	}
+
+	apiReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	apiRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(apiRec, apiReq)
+	if apiRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated API status=%d want 401", apiRec.Code)
+	}
+
+	authReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	authReq.Header.Set("Authorization", "Bearer secret")
+	authRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(authRec, authReq)
+	if authRec.Code != http.StatusOK {
+		t.Fatalf("authenticated health status=%d body=%s", authRec.Code, authRec.Body.String())
+	}
+	if !strings.Contains(authRec.Body.String(), `"web_admin":true`) {
+		t.Fatalf("health did not advertise web admin: %s", authRec.Body.String())
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	server, _ := testServer(t, "secret")
 
