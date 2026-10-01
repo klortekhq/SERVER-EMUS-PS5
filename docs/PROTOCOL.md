@@ -156,7 +156,8 @@ EOF, cambios en el archivo o un error de red pueden producir una lectura más co
 GET /api/v1/metrics
 ~~~
 
-Devuelve contadores acumulados desde el arranque:
+Devuelve contadores acumulados desde el arranque. `range_requests` cuenta intentos Range del cliente; `full_get_requests` cuenta respuestas GET completas `200 OK`. Una petición Range con `If-Range` obsoleto puede incrementar ambos contadores porque el servidor responde con el archivo completo.
+
 
 - `uptime_seconds`;
 - `file_get_requests`;
@@ -331,9 +332,9 @@ GET /api/v1/metrics
 ~~~
 
 The endpoint exposes cumulative counters since process start: uptime, file
-GET/HEAD requests, Range requests, full GETs, sidecar requests, total bytes,
+GET/HEAD requests, Range attempts, successful full 200 GET responses, sidecar requests, total bytes,
 Range/full-GET bytes, cumulative/max file-request latency in microseconds, 404s
-and errors. It contains no game IDs, names or physical paths.
+and errors. A Range request with a stale `If-Range` validator may increment both the Range-attempt counter and the full-GET counter because the emitted response is a complete `200 OK`. It contains no game IDs, names or physical paths.
 
 Average file-request latency for a sample is
 `file_request_duration_us_total / (file_get_requests + file_head_requests)`

@@ -101,6 +101,39 @@ func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 	}
 }
 
+func TestTransportMetricsClassifiesStaleIfRangeFallbackAsFullGet(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	req.Header.Set("Range", "bytes=2-5")
+	req.Header.Set("If-Range", "\"stale-etag\"")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stale If-Range status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "0123456789" {
+		t.Fatalf("stale If-Range body=%q", rec.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	for _, want := range []string{
+		`"file_get_requests":1`,
+		`"range_requests":1`,
+		`"full_get_requests":1`,
+		`"bytes_served":10`,
+		`"range_bytes_served":0`,
+		`"full_get_bytes_served":10`,
+	} {
+		if !strings.Contains(metricsRec.Body.String(), want) {
+			t.Fatalf("If-Range metrics missing %s: %s", want, metricsRec.Body.String())
+		}
+	}
+}
+
 func TestTransportMetricsResetRequiresTokenAndClearsCounters(t *testing.T) {
 	unsecured, unsecuredEntry := testServer(t, "")
 	rangeReq := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+unsecuredEntry.ID, nil)

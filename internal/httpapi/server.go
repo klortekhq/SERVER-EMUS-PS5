@@ -340,9 +340,13 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.metrics.bytesServed.Add(mw.bytes)
 		if r.Method == http.MethodGet {
-			if r.Header.Get("Range") != "" {
+			// Classify bytes by the response actually emitted. A stale If-Range
+			// deliberately turns a Range attempt into a complete 200 response.
+			switch mw.status {
+			case http.StatusPartialContent:
 				s.metrics.rangeBytesServed.Add(mw.bytes)
-			} else {
+			case http.StatusOK:
+				s.metrics.fullGetRequests.Add(1)
 				s.metrics.fullGetBytesServed.Add(mw.bytes)
 			}
 		}
@@ -366,9 +370,10 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		s.metrics.fileGetRequests.Add(1)
 		if r.Header.Get("Range") != "" {
+			// Range requests count client attempts. full_get_requests counts
+			// successful complete 200 responses after ServeContent resolves
+			// validators such as If-Range.
 			s.metrics.rangeRequests.Add(1)
-		} else {
-			s.metrics.fullGetRequests.Add(1)
 		}
 	} else if r.Method == http.MethodHead {
 		s.metrics.fileHeadRequests.Add(1)
