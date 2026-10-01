@@ -90,6 +90,30 @@ En Windows el mismo campo puede ser, por ejemplo:
 "path": "D:\\Roms\\PS1"
 ~~~
 
+### WebUI
+
+El propio binario sirve una interfaz administrativa en:
+
+~~~text
+http://<servidor>:8787/admin/
+~~~
+
+La página HTML no contiene el token ni rutas físicas y puede cargarse sin
+credenciales. Cuando el servidor usa bearer token, la WebUI lo solicita y lo
+guarda únicamente en `sessionStorage` de esa pestaña; todas las llamadas
+`/api/` continúan protegidas exactamente igual que los clientes nativos.
+
+Desde la WebUI se puede:
+
+- ver estado, bibliotecas path-free y métricas;
+- reconstruir el catálogo;
+- resetear métricas para benchmarks;
+- generar una plantilla segura de bibliotecas;
+- validar y reemplazar la configuración de bibliotecas en caliente.
+
+Como las APIs de descubrimiento nunca devuelven paths físicos, la plantilla deja
+`path` vacío y exige que el administrador lo reintroduzca antes de aplicar.
+
 ### API v1
 
 - GET /api/v1/health
@@ -209,10 +233,23 @@ performance claim is made.
 
 See config.example.json. Paths use the host operating system's native path syntax.
 
+### WebUI
+
+The server binary also exposes a dependency-free administration shell at
+`/admin/`. The HTML contains no server token or host paths. With bearer
+authentication enabled, the token is kept only in the browser tab's
+`sessionStorage`; all `/api/` routes remain bearer-protected.
+
+The UI can inspect path-free libraries/metrics, rebuild the catalog, reset
+benchmark counters, create a safe library template and validate/replace the
+managed library set. Physical paths must be re-entered because discovery APIs
+deliberately never return them.
+
 ### API v1
 
 - GET /api/v1/health
 - GET /api/v1/metrics
+- POST /api/v1/admin/metrics/reset
 - GET /api/v1/systems
 - GET /api/v1/libraries
 - POST /api/v1/catalog/rebuild
@@ -276,11 +313,10 @@ metadata, not physical NAS paths. Periodic rescans therefore keep the same ETag
 when nothing relevant changed.
 
 The authenticated library-editing API is implemented with pre-validation,
-persistent config replacement and live catalog swapping. Path-free transport
-metrics are also implemented and green across CI/portable builds, giving
-physical-PS5 tests counters for Range requests and transferred bytes. An
-authenticated metrics reset starts each benchmark from zero. The
-remaining management work is the UI/WebUI for that API, physical-PS5
-`emus://` validation, measured prefetch tuning and real LAN benchmarks
-against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
+persistent config replacement and live catalog swapping. The built-in
+dependency-free WebUI is implemented and verified on Linux, Windows and macOS
+while keeping all API routes behind the existing bearer boundary. Path-free
+transport metrics plus authenticated reset provide clean samples for PS5
+benchmarks. The remaining work is physical-PS5 `emus://` validation,
+measured prefetch tuning and real LAN benchmarks against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
