@@ -98,4 +98,18 @@ func TestResolveFromAnchorKeepsSidecarsInsideLibrary(t *testing.T) {
 	if _, ok := cat.ResolveFromAnchor(cue.ID, "/etc/passwd"); ok {
 		t.Fatal("absolute virtual path was accepted")
 	}
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.bin")
+	if err := os.WriteFile(secret, []byte("SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(gameDir, "escape.bin")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Logf("symlink escape test skipped on this runner: %v", err)
+		return
+	}
+	if _, ok := cat.ResolveFromAnchor(cue.ID, "escape.bin"); ok {
+		t.Fatal("symlink escaped configured library")
+	}
 }
