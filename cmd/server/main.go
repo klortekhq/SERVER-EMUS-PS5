@@ -15,12 +15,21 @@ import (
 	"github.com/klortekhq/server-emus-ps5/internal/catalog"
 	"github.com/klortekhq/server-emus-ps5/internal/config"
 	"github.com/klortekhq/server-emus-ps5/internal/httpapi"
+	setupwizard "github.com/klortekhq/server-emus-ps5/internal/setup"
 )
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to JSON configuration")
 	rescan := flag.Duration("rescan", 5*time.Minute, "catalog rescan interval; 0 disables automatic rescans")
+	setupMode := flag.Bool("setup", false, "interactive bilingual configuration wizard")
 	flag.Parse()
+
+	if *setupMode {
+		if err := setupwizard.Run(os.Stdin, os.Stdout, *configPath); err != nil {
+			log.Fatalf("setup: %v", err)
+		}
+		return
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
