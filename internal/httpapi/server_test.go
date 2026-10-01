@@ -216,6 +216,43 @@ func TestCatalogRebuildRequiresConfiguredToken(t *testing.T) {
 	}
 }
 
+func TestHealthCapabilities(t *testing.T) {
+	server, _ := testServer(t, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`"service":"SERVER-EMUS-PS5"`,
+		`"api":"v1"`,
+		`"byte_ranges":true`,
+		`"anchored_virtual_sidecars":true`,
+		`"catalog_discovery":true`,
+		`"catalog_etag":true`,
+		`"catalog_rebuild":false`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("health response missing %s: %s", want, rec.Body.String())
+		}
+	}
+
+	secured, _ := testServer(t, "secret")
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec = httptest.NewRecorder()
+	secured.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("secured health status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"catalog_rebuild":true`) {
+		t.Fatalf("secured health did not advertise rebuild capability: %s", rec.Body.String())
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	server, _ := testServer(t, "secret")
 
