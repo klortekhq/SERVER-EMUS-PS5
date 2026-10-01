@@ -26,7 +26,8 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 `GET /api/v1/health` devuelve `service`, `api` y un bloque
 `capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
-`catalog_rebuild` y `transport_metrics`.
+`catalog_rebuild`, `transport_metrics` y, cuando hay token,
+`transport_metrics_reset`.
 
 `catalog_rebuild` solo es `true` cuando hay bearer token configurado.
 `library_editing` requiere además un archivo de configuración gestionable. El
@@ -151,6 +152,16 @@ No incluye IDs de juegos, nombres ni rutas físicas. Su objetivo es comparar
 patrones y coste de transporte antes/después de read-ahead o caché y durante
 benchmarks EMUS vs SMB.
 
+Con autenticación habilitada:
+
+~~~http
+POST /api/v1/admin/metrics/reset
+Authorization: Bearer <token>
+~~~
+
+pone a cero todos los contadores de transporte para iniciar una nueva muestra.
+Sin token configurado, el reset administrativo permanece deshabilitado.
+
 ### Autenticación
 
 Cuando el servidor tiene token:
@@ -195,7 +206,8 @@ The ID comes from the catalog and does not expose a physical server path. The tr
 `GET /api/v1/health` returns `service`, `api`, and a
 `capabilities` object. v1 explicitly advertises `byte_ranges`,
 `anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
-`catalog_rebuild`, and `transport_metrics`.
+`catalog_rebuild`, `transport_metrics`, and, when a token is configured,
+`transport_metrics_reset`.
 
 `catalog_rebuild` is true only when a bearer token is configured.
 `library_editing` additionally requires a managed configuration path. PS5
@@ -276,6 +288,11 @@ GET/HEAD requests, Range requests, full GETs, sidecar requests, bytes served,
 
 These counters are intended to quantify request/byte behavior before and after
 read-ahead/cache changes and during EMUS-vs-SMB benchmarks.
+
+With authentication enabled,
+`POST /api/v1/admin/metrics/reset` clears all transport counters so each
+benchmark can start from zero. The reset endpoint stays disabled when no bearer
+token is configured.
 
 ### Authentication
 
