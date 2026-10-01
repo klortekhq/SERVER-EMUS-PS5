@@ -149,6 +149,11 @@ func scanLibrary(
 	entries map[string]Entry,
 	systems map[string]int,
 ) error {
+	resolvedRoot, err := filepath.EvalSymlinks(lib.Path)
+	if err != nil {
+		return fmt.Errorf("resolve library %q: %w", lib.Name, err)
+	}
+
 	allowed := make(map[string]struct{}, len(lib.Extensions))
 	for _, ext := range lib.Extensions {
 		if ext != "" {
@@ -156,11 +161,11 @@ func scanLibrary(
 		}
 	}
 
-	return filepath.WalkDir(lib.Path, func(filePath string, d fs.DirEntry, err error) error {
+	return filepath.WalkDir(resolvedRoot, func(filePath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("scan %q: %w", lib.Name, err)
 		}
-		if filePath == lib.Path {
+		if filePath == resolvedRoot {
 			return nil
 		}
 		if d.IsDir() {
@@ -182,18 +187,25 @@ func scanLibrary(
 			}
 		}
 
-		info, err := d.Info()
+		resolvedPath, ok := resolveExistingWithinRoot(resolvedRoot, filePath)
+		if !ok {
+			// A regular-looking symlink may target a file outside the configured
+			// library. Keep it out of the catalog instead of turning the server
+			// into an arbitrary file reader.
+			return nil
+		}
+		info, err := os.Stat(resolvedPath)
 		if err != nil {
 			return fmt.Errorf("stat %q: %w", filePath, err)
 		}
-		rel, err := filepath.Rel(lib.Path, filePath)
+		rel, err := filepath.Rel(resolvedRoot, filePath)
 		if err != nil {
 			return fmt.Errorf("relative path %q: %w", filePath, err)
 		}
 		rel = filepath.ToSlash(rel)
 		id := stableID(lib.Name, lib.System, rel)
 		etag := metadataETag(info.Size(), info.ModTime())
-		metadata, err := loadGameMetadata(lib.Path, filePath)
+		metadata, err := loadGameMetadata(resolvedRoot, filePath)
 		if err != nil {
 			return fmt.Errorf("metadata for %q: %w", rel, err)
 		}
@@ -208,8 +220,8 @@ func scanLibrary(
 			ModifiedAt:   info.ModTime().UTC(),
 			ETag:         etag,
 			Metadata:     metadata,
-			HostPath:     filePath,
-			LibraryRoot:  lib.Path,
+			HostPath:     resolvedPath,
+			LibraryRoot:  resolvedRoot,
 		}
 		systems[lib.System]++
 		return nil
