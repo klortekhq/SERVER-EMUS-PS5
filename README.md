@@ -128,6 +128,13 @@ Como las APIs de descubrimiento nunca devuelven paths físicos, la plantilla dej
 - HEAD /api/v1/files/{id}
 - Range: bytes=start-end soportado por el endpoint de archivo
 
+El catálogo admite metadatos opcionales por juego en sidecars locales
+`.emus.json`: identificadores específicos de consola, referencias, arte y
+manifiestos de cheats con formato, versión, procedencia/licencia. El servidor
+los valida y publica sin descargar ni activar cheats. Véase
+[docs/PROTOCOL.md](docs/PROTOCOL.md#metadatos-opcionales-del-juego) para el
+formato y sus límites.
+
 El ID es un hash estable derivado de la biblioteca y la ruta relativa. El sufijo
 opcional de `emus://host/id/ruta` se usa como ruta virtual relativa para
 sidecars del descriptor. El servidor la resuelve dentro de la misma biblioteca
@@ -259,6 +266,13 @@ deliberately never return them.
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
 - file endpoint supports standard Range: bytes=start-end
+
+The catalog accepts optional per-game metadata from local `.emus.json`
+sidecars: platform-specific identifiers, references, artwork and cheat
+manifests with format, version, provenance and license. The server validates
+and publishes these declarations without downloading or activating cheats.
+See [docs/PROTOCOL.md](docs/PROTOCOL.md#metadatos-opcionales-del-juego) for the format
+and limits.
 
 File IDs are stable hashes derived from the library and relative path. The
 optional `emus://host/id/path` suffix is an anchored virtual path used for

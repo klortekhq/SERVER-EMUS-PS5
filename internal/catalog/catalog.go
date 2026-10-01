@@ -3,9 +3,13 @@ package catalog
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,16 +20,65 @@ import (
 )
 
 type Entry struct {
-	ID           string    `json:"id"`
-	Library      string    `json:"library"`
-	System       string    `json:"system"`
-	Name         string    `json:"name"`
-	RelativePath string    `json:"relative_path"`
-	Size         int64     `json:"size"`
-	ModifiedAt   time.Time `json:"modified_at"`
-	ETag         string    `json:"etag"`
-	HostPath     string    `json:"-"`
-	LibraryRoot  string    `json:"-"`
+	ID           string        `json:"id"`
+	Library      string        `json:"library"`
+	System       string        `json:"system"`
+	Name         string        `json:"name"`
+	RelativePath string        `json:"relative_path"`
+	Size         int64         `json:"size"`
+	ModifiedAt   time.Time     `json:"modified_at"`
+	ETag         string        `json:"etag"`
+	Metadata     *GameMetadata `json:"metadata,omitempty"`
+	HostPath     string        `json:"-"`
+	LibraryRoot  string        `json:"-"`
+}
+
+// GameMetadata is an optional, user-maintained sidecar for a catalogued game.
+// It contains references and resource paths only; the server never downloads,
+// activates, or executes cheat files or artwork automatically.
+type GameMetadata struct {
+	Title       string            `json:"title,omitempty"`
+	Identifiers []GameIdentifier  `json:"identifiers,omitempty"`
+	Region      string            `json:"region,omitempty"`
+	Developer   string            `json:"developer,omitempty"`
+	Publisher   string            `json:"publisher,omitempty"`
+	ReleaseDate string            `json:"release_date,omitempty"`
+	Genres      []string          `json:"genres,omitempty"`
+	References  []MetadataLink    `json:"references,omitempty"`
+	Artwork     []ArtworkResource `json:"artwork,omitempty"`
+	Cheats      []CheatResource   `json:"cheats,omitempty"`
+}
+
+type GameIdentifier struct {
+	Kind     string `json:"kind"`
+	Value    string `json:"value"`
+	Region   string `json:"region,omitempty"`
+	Revision string `json:"revision,omitempty"`
+}
+
+type MetadataLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+type ArtworkResource struct {
+	Kind        string `json:"kind"`
+	Path        string `json:"path,omitempty"`
+	URL         string `json:"url,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	License     string `json:"license,omitempty"`
+	Attribution string `json:"attribution,omitempty"`
+}
+
+type CheatResource struct {
+	Format      string `json:"format"`
+	Path        string `json:"path,omitempty"`
+	URL         string `json:"url,omitempty"`
+	GameVersion string `json:"game_version,omitempty"`
+	Emulator    string `json:"emulator,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	License     string `json:"license,omitempty"`
+	Attribution string `json:"attribution,omitempty"`
 }
 
 type SystemStat struct {
@@ -42,8 +95,8 @@ type LibraryStat struct {
 }
 
 type Catalog struct {
-	mu      sync.RWMutex
-	cfg     config.Config
+	mu       sync.RWMutex
+	cfg      config.Config
 	entries  map[string]Entry
 	systems  map[string]int
 	revision string
@@ -125,6 +178,10 @@ func scanLibrary(
 		rel = filepath.ToSlash(rel)
 		id := stableID(lib.Name, lib.System, rel)
 		etag := metadataETag(info.Size(), info.ModTime())
+		metadata, err := loadGameMetadata(lib.Path, filePath)
+		if err != nil {
+			return fmt.Errorf("metadata for %q: %w", rel, err)
+		}
 
 		entries[id] = Entry{
 			ID:           id,
@@ -135,6 +192,7 @@ func scanLibrary(
 			Size:         info.Size(),
 			ModifiedAt:   info.ModTime().UTC(),
 			ETag:         etag,
+			Metadata:     metadata,
 			HostPath:     filePath,
 			LibraryRoot:  lib.Path,
 		}
@@ -173,6 +231,9 @@ func catalogRevision(cfg config.Config, entries map[string]Entry) string {
 			h, "E\x00%s\x00%d\x00%d\x00",
 			id, entry.Size, entry.ModifiedAt.UnixNano(),
 		)
+		if metadata, err := json.Marshal(entry.Metadata); err == nil {
+			fmt.Fprintf(h, "M\x00%s\x00", metadata)
+		}
 	}
 
 	sum := h.Sum(nil)
@@ -219,6 +280,128 @@ func stableID(library, system, relative string) string {
 func metadataETag(size int64, mod time.Time) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", size, mod.UnixNano())))
 	return `"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
+func loadGameMetadata(root, gamePath string) (*GameMetadata, error) {
+	path := gamePath + ".emus.json"
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("sidecar escapes configured library")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		resolved, resolveErr := filepath.EvalSymlinks(path)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		resolvedRoot, resolveErr := filepath.EvalSymlinks(root)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		rel, resolveErr := filepath.Rel(resolvedRoot, resolved)
+		if resolveErr != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("sidecar escapes configured library")
+		}
+		path = resolved
+		info, err = os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !info.Mode().IsRegular() || info.Size() > 64*1024 {
+		return nil, fmt.Errorf("sidecar must be a regular file no larger than 64 KiB")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	decoder := json.NewDecoder(io.LimitReader(f, 64*1024+1))
+	decoder.DisallowUnknownFields()
+	var metadata GameMetadata
+	if err := decoder.Decode(&metadata); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("sidecar must contain a single JSON object")
+	}
+	if err := validateGameMetadata(&metadata); err != nil {
+		return nil, err
+	}
+	return &metadata, nil
+}
+
+func validateGameMetadata(m *GameMetadata) error {
+	if len(m.Title) > 512 || len(m.Region) > 64 || len(m.Developer) > 256 || len(m.Publisher) > 256 || len(m.ReleaseDate) > 32 {
+		return fmt.Errorf("text field exceeds its size limit")
+	}
+	if len(m.Identifiers) > 32 || len(m.Genres) > 32 || len(m.References) > 64 || len(m.Artwork) > 64 || len(m.Cheats) > 128 {
+		return fmt.Errorf("metadata list exceeds its size limit")
+	}
+	for _, id := range m.Identifiers {
+		if id.Kind == "" || id.Value == "" || len(id.Kind) > 64 || len(id.Value) > 128 || len(id.Region) > 64 || len(id.Revision) > 64 {
+			return fmt.Errorf("invalid platform identifier")
+		}
+	}
+	for _, genre := range m.Genres {
+		if genre == "" || len(genre) > 64 {
+			return fmt.Errorf("invalid genre")
+		}
+	}
+	for _, link := range m.References {
+		if len(link.Label) > 128 || !validHTTPSURL(link.URL) {
+			return fmt.Errorf("references must have a label and an HTTPS URL")
+		}
+	}
+	for _, art := range m.Artwork {
+		if art.Kind == "" || len(art.Kind) > 64 || !validResourceLocation(art.Path, art.URL) || !validSHA256(art.SHA256) || len(art.License) > 160 || len(art.Attribution) > 256 {
+			return fmt.Errorf("invalid artwork resource")
+		}
+	}
+	for _, cheat := range m.Cheats {
+		if cheat.Format == "" || len(cheat.Format) > 64 || !validResourceLocation(cheat.Path, cheat.URL) || !validSHA256(cheat.SHA256) || len(cheat.GameVersion) > 128 || len(cheat.Emulator) > 128 || len(cheat.License) > 160 || len(cheat.Attribution) > 256 {
+			return fmt.Errorf("invalid cheat resource")
+		}
+	}
+	return nil
+}
+
+func validSHA256(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validResourceLocation(path, url string) bool {
+	if (path == "") == (url == "") {
+		return false
+	}
+	if url != "" {
+		return validHTTPSURL(url)
+	}
+	path = strings.ReplaceAll(path, "\\", "/")
+	clean := pathpkg.Clean(path)
+	return !strings.ContainsRune(path, 0) && !strings.Contains(path, ":") && !strings.HasPrefix(path, "/") && !filepath.IsAbs(path) && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+func validHTTPSURL(raw string) bool {
+	if len(raw) > 2048 {
+		return false
+	}
+	parsed, err := url.ParseRequestURI(raw)
+	return err == nil && strings.EqualFold(parsed.Scheme, "https") && parsed.Host != "" && parsed.User == nil
 }
 
 func (c *Catalog) Get(id string) (Entry, bool) {

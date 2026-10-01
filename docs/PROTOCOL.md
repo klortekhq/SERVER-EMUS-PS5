@@ -53,6 +53,65 @@ El segundo endpoint devuelve entradas con:
 
 Nunca devuelve la ruta física real. Las extensiones configuradas determinan qué archivos aparecen como juegos lanzables; los sidecars referenciados por un descriptor no necesitan aparecer en el catálogo.
 
+#### Metadatos opcionales del juego
+
+Junto a un archivo lanzable, el administrador puede crear un sidecar
+`<archivo-lanzable>.emus.json` (por ejemplo, `Juego.iso.emus.json`). Es
+opcional y permanece en la biblioteca del usuario; nunca se copia al
+repositorio ni se añade a una release. El endpoint de juegos lo incluye como
+`metadata`. Puede contener título, región, desarrollador/editor, géneros,
+referencias HTTPS, identificadores específicos de esa consola, medios y
+manifiestos de cheats. Un identificador PS3 puede declarar su clase como
+`disc_serial`; otros sistemas pueden usar el tipo que requiera su formato
+(por ejemplo CRC o product code). Los valores se conservan tal como se
+proporcionan y no se infiere equivalencia entre plataformas.
+
+```json
+{
+  "title": "Juego de ejemplo",
+  "identifiers": [
+    {"kind": "disc_serial", "value": "BLES12345", "region": "Europe"}
+  ],
+  "references": [
+    {"label": "Referencia", "url": "https://example.org/game"}
+  ],
+  "artwork": [
+    {
+      "kind": "box_front",
+      "path": "art/front.png",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "license": "user-provided",
+      "attribution": "aportado por el usuario"
+    }
+  ],
+  "cheats": [
+    {
+      "format": "libretro-cht",
+      "path": "cheats/game.cht",
+      "game_version": "1.00",
+      "emulator": "core compatible",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "autor o fuente original"
+    }
+  ]
+}
+```
+
+Arte y cheats locales se indican como rutas virtuales relativas al directorio
+del juego y pueden leerse solo bajo el mismo ID ancla mediante el endpoint de
+archivo existente; el cliente debe codificar la ruta como query `path`. El
+servidor no sigue enlaces fuera de la biblioteca. También se admiten URLs
+HTTPS para recursos externos, pero el servidor solo las publica: no las
+descarga ni las ejecuta. La interfaz del emulador debe pedir al usuario
+seleccionar los cheats y comprobar que el formato y la versión de juego/core
+coinciden antes de aplicarlos.
+
+Los sidecars se limitan a 64 KiB, validan cantidades y tamaños de campos,
+requieren URL HTTPS para referencias externas y forman parte del ETag del
+catálogo. Un JSON incorrecto o un recurso con ruta no relativa hace que el
+rescan falle de forma explícita; tras corregir el sidecar se puede reconstruir
+el catálogo.
+
 ### Rutas virtuales y sidecars
 
 Para un CUE catalogado como `Juego.cue`, el arranque puede usar:
