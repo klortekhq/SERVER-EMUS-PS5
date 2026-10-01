@@ -25,8 +25,8 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 
 `GET /api/v1/health` devuelve `service`, `api` y un bloque
 `capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
-`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag` y
-`catalog_rebuild`.
+`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
+`catalog_rebuild` y `transport_metrics`.
 
 `catalog_rebuild` solo es `true` cuando hay bearer token configurado.
 `library_editing` requiere además un archivo de configuración gestionable. El
@@ -129,6 +129,28 @@ Content-Length: 524288
 Un cliente no debe asumir que toda lectura devuelve el tamaño solicitado:
 EOF, cambios en el archivo o un error de red pueden producir una lectura más corta.
 
+### Métricas de transporte
+
+~~~http
+GET /api/v1/metrics
+~~~
+
+Devuelve contadores acumulados desde el arranque:
+
+- `uptime_seconds`;
+- `file_get_requests`;
+- `file_head_requests`;
+- `range_requests`;
+- `full_get_requests`;
+- `sidecar_requests`;
+- `bytes_served`;
+- `not_found`;
+- `errors`.
+
+No incluye IDs de juegos, nombres ni rutas físicas. Su objetivo es comparar
+patrones y coste de transporte antes/después de read-ahead o caché y durante
+benchmarks EMUS vs SMB.
+
 ### Autenticación
 
 Cuando el servidor tiene token:
@@ -172,8 +194,8 @@ The ID comes from the catalog and does not expose a physical server path. The tr
 
 `GET /api/v1/health` returns `service`, `api`, and a
 `capabilities` object. v1 explicitly advertises `byte_ranges`,
-`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`, and
-`catalog_rebuild`.
+`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
+`catalog_rebuild`, and `transport_metrics`.
 
 `catalog_rebuild` is true only when a bearer token is configured.
 `library_editing` additionally requires a managed configuration path. PS5
@@ -241,6 +263,19 @@ Content-Length: 524288
 
 Clients must allow short reads at EOF and treat an ETag change as file
 invalidation.
+
+### Transport metrics
+
+~~~http
+GET /api/v1/metrics
+~~~
+
+The endpoint exposes cumulative counters since process start: uptime, file
+GET/HEAD requests, Range requests, full GETs, sidecar requests, bytes served,
+404s and errors. It contains no game IDs, names or physical paths.
+
+These counters are intended to quantify request/byte behavior before and after
+read-ahead/cache changes and during EMUS-vs-SMB benchmarks.
 
 ### Authentication
 
