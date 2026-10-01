@@ -91,6 +91,55 @@ func TestLibrariesEndpointDoesNotExposeHostPaths(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedCatalogRebuild(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "disc1.chd"), []byte("ONE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.New(config.Config{Libraries: []config.Library{{
+		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".chd"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(cat, "secret")
+
+	if got := len(cat.Entries("ps1")); got != 1 {
+		t.Fatalf("initial entries=%d want 1", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, "disc2.chd"), []byte("TWO"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/catalog/rebuild", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rebuild status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := len(cat.Entries("ps1")); got != 2 {
+		t.Fatalf("rebuilt entries=%d want 2", got)
+	}
+	for _, want := range []string{`"ok":true`, `"files":2`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("rebuild response missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestCatalogRebuildRequiresConfiguredToken(t *testing.T) {
+	server, _ := testServer(t, "")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/catalog/rebuild", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want 403", rec.Code)
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	server, _ := testServer(t, "secret")
 
