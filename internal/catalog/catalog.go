@@ -33,6 +33,14 @@ type SystemStat struct {
 	Files  int    `json:"files"`
 }
 
+type LibraryStat struct {
+	Name       string   `json:"name"`
+	System     string   `json:"system"`
+	Recursive  bool     `json:"recursive"`
+	Extensions []string `json:"extensions,omitempty"`
+	Files      int      `json:"files"`
+}
+
 type Catalog struct {
 	mu      sync.RWMutex
 	cfg     config.Config
@@ -236,6 +244,35 @@ func (c *Catalog) Entries(system string) []Entry {
 			return out[i].Library < out[j].Library
 		}
 		return strings.ToLower(out[i].RelativePath) < strings.ToLower(out[j].RelativePath)
+	})
+	return out
+}
+
+func (c *Catalog) Libraries() []LibraryStat {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	counts := make(map[string]int, len(c.cfg.Libraries))
+	for _, entry := range c.entries {
+		counts[entry.Library]++
+	}
+
+	out := make([]LibraryStat, 0, len(c.cfg.Libraries))
+	for _, lib := range c.cfg.Libraries {
+		extensions := append([]string(nil), lib.Extensions...)
+		out = append(out, LibraryStat{
+			Name:       lib.Name,
+			System:     lib.System,
+			Recursive:  lib.Recursive,
+			Extensions: extensions,
+			Files:      counts[lib.Name],
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].System != out[j].System {
+			return out[i].System < out[j].System
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
 	return out
 }
