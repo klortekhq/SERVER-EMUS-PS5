@@ -24,6 +24,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", s.health)
 	mux.HandleFunc("/api/v1/systems", s.systems)
+	mux.HandleFunc("/api/v1/libraries", s.libraries)
 	mux.HandleFunc("/api/v1/games", s.games)
 	mux.HandleFunc("/api/v1/files/", s.file)
 	return s.auth(mux)
@@ -67,6 +68,14 @@ func (s *Server) systems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.catalog.Systems())
+}
+
+func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.catalog.Libraries())
 }
 
 func (s *Server) games(w http.ResponseWriter, r *http.Request) {
