@@ -9,10 +9,23 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/klortekhq/server-emus-ps5/internal/catalog"
 	"github.com/klortekhq/server-emus-ps5/internal/config"
 )
+
+type transportMetrics struct {
+	fileGetRequests  atomic.Uint64
+	fileHeadRequests atomic.Uint64
+	rangeRequests    atomic.Uint64
+	fullGetRequests  atomic.Uint64
+	sidecarRequests  atomic.Uint64
+	bytesServed      atomic.Uint64
+	notFound         atomic.Uint64
+	errors           atomic.Uint64
+}
 
 type Server struct {
 	catalog    *catalog.Catalog
@@ -20,10 +33,16 @@ type Server struct {
 	configPath string
 	cfg        config.Config
 	adminMu    sync.Mutex
+	started    time.Time
+	metrics    transportMetrics
 }
 
 func New(cat *catalog.Catalog, token string) *Server {
-	return &Server{catalog: cat, token: strings.TrimSpace(token)}
+	return &Server{
+		catalog: cat,
+		token:   strings.TrimSpace(token),
+		started: time.Now().UTC(),
+	}
 }
 
 func NewManaged(cat *catalog.Catalog, cfg config.Config, configPath string) *Server {
@@ -32,12 +51,14 @@ func NewManaged(cat *catalog.Catalog, cfg config.Config, configPath string) *Ser
 		token:      strings.TrimSpace(cfg.Token),
 		configPath: strings.TrimSpace(configPath),
 		cfg:        cfg,
+		started:    time.Now().UTC(),
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", s.health)
+	mux.HandleFunc("/api/v1/metrics", s.transportMetrics)
 	mux.HandleFunc("/api/v1/systems", s.systems)
 	mux.HandleFunc("/api/v1/libraries", s.libraries)
 	mux.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
@@ -83,7 +104,31 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"catalog_etag":              true,
 			"catalog_rebuild":           s.token != "",
 			"library_editing":           s.token != "" && s.configPath != "",
+			"transport_metrics":          true,
 		},
+	})
+}
+
+func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	uptime := time.Since(s.started)
+	if uptime < 0 {
+		uptime = 0
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"uptime_seconds":     uint64(uptime / time.Second),
+		"file_get_requests":  s.metrics.fileGetRequests.Load(),
+		"file_head_requests": s.metrics.fileHeadRequests.Load(),
+		"range_requests":     s.metrics.rangeRequests.Load(),
+		"full_get_requests":  s.metrics.fullGetRequests.Load(),
+		"sidecar_requests":   s.metrics.sidecarRequests.Load(),
+		"bytes_served":       s.metrics.bytesServed.Load(),
+		"not_found":          s.metrics.notFound.Load(),
+		"errors":             s.metrics.errors.Load(),
 	})
 }
 
@@ -207,41 +252,89 @@ func (s *Server) games(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, s.catalog.Entries(r.URL.Query().Get("system")))
 }
+type metricResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  uint64
+}
+
+func (w *metricResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *metricResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(p)
+	w.bytes += uint64(n)
+	return n, err
+}
+
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
+	mw := &metricResponseWriter{ResponseWriter: w}
+	defer func() {
+		s.metrics.bytesServed.Add(mw.bytes)
+		if mw.status == http.StatusNotFound {
+			s.metrics.notFound.Add(1)
+		}
+		if mw.status >= 400 {
+			s.metrics.errors.Add(1)
+		}
+	}()
+
+	if r.Method == http.MethodGet {
+		s.metrics.fileGetRequests.Add(1)
+		if r.Header.Get("Range") != "" {
+			s.metrics.rangeRequests.Add(1)
+		} else {
+			s.metrics.fullGetRequests.Add(1)
+		}
+	} else if r.Method == http.MethodHead {
+		s.metrics.fileHeadRequests.Add(1)
+	}
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		mw.Header().Set("Allow", "GET, HEAD")
+		writeJSON(mw, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/files/")
 	if id == "" || strings.Contains(id, "/") || strings.Contains(id, "\\") {
-		http.NotFound(w, r)
+		http.NotFound(mw, r)
 		return
 	}
 
 	virtualPath := r.URL.Query().Get("path")
+	if virtualPath != "" {
+		s.metrics.sidecarRequests.Add(1)
+	}
 	f, entry, err := s.catalog.OpenVirtual(id, virtualPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			http.NotFound(w, r)
+			http.NotFound(mw, r)
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "open file failed"})
+		writeJSON(mw, http.StatusInternalServerError, map[string]string{"error": "open file failed"})
 		return
 	}
 	defer f.Close()
 
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("ETag", entry.ETag)
-	w.Header().Set("X-Emu-System", entry.System)
-	w.Header().Set("X-Emu-Library", entry.Library)
+	mw.Header().Set("Content-Type", "application/octet-stream")
+	mw.Header().Set("Accept-Ranges", "bytes")
+	mw.Header().Set("ETag", entry.ETag)
+	mw.Header().Set("X-Emu-System", entry.System)
+	mw.Header().Set("X-Emu-Library", entry.Library)
 	if virtualPath != "" {
-		w.Header().Set("X-Emu-Relative-Path", entry.RelativePath)
+		mw.Header().Set("X-Emu-Relative-Path", entry.RelativePath)
 	}
 
-	http.ServeContent(w, r, entry.Name, entry.ModifiedAt, f)
+	http.ServeContent(mw, r, entry.Name, entry.ModifiedAt, f)
 }
 
 func catalogNotModified(w http.ResponseWriter, r *http.Request, etag string) bool {
