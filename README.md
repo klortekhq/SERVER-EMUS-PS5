@@ -2,7 +2,7 @@
 
 Portable library and random-access streaming server for the native PS5 emulator family.
 
-> **Estado / Status: MVP en desarrollo · 35%**
+> **Estado / Status: MVP funcional · 55%**
 
 [Español](#español) · [English](#english)
 
@@ -101,6 +101,8 @@ En Windows el mismo campo puede ser, por ejemplo:
 El ID es un hash estable derivado de la biblioteca y la ruta relativa. El cliente
 no puede solicitar rutas arbitrarias del host.
 
+Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ### Ejecutar
 
 ~~~bash
@@ -185,6 +187,8 @@ See config.example.json. Paths use the host operating system's native path synta
 File IDs are stable hashes derived from the library and relative path. Clients
 cannot request arbitrary server paths.
 
+Full specification: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ### Run
 
 ~~~bash
@@ -201,3 +205,23 @@ go build -trimpath -ldflags="-s -w" -o server-emus ./cmd/server
 
 Only main is used for project development. Configuration files containing
 private paths/tokens and copyrighted content must never be committed.
+
+---
+
+## Estado verificado / Verified state
+
+GitHub Actions run **36839534929** passes tests and builds on Linux, Windows and
+macOS.
+
+Portable-build run **36839534917** produces six standalone artifacts:
+
+- Linux amd64
+- Linux arm64
+- Windows amd64
+- Windows arm64
+- macOS amd64
+- macOS arm64
+
+The remaining MVP work is the library-management UI/API, native PS5
+`emus://` client validation, reconnect/prefetch tuning and real LAN benchmarks
+against SMB.
