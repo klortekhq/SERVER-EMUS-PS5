@@ -22,6 +22,7 @@ func TestWizardCreatesPortableConfig(t *testing.T) {
 		"",
 		"8787",
 		"",
+		"",
 	}, "\n")
 
 	var out bytes.Buffer
