@@ -44,8 +44,9 @@ type LibraryStat struct {
 type Catalog struct {
 	mu      sync.RWMutex
 	cfg     config.Config
-	entries map[string]Entry
-	systems map[string]int
+	entries  map[string]Entry
+	systems  map[string]int
+	revision string
 }
 
 func New(cfg config.Config) (*Catalog, error) {
@@ -65,10 +66,12 @@ func (c *Catalog) Rebuild() error {
 			return err
 		}
 	}
+	revision := catalogRevision(c.cfg, entries)
 
 	c.mu.Lock()
 	c.entries = entries
 	c.systems = systems
+	c.revision = revision
 	c.mu.Unlock()
 	return nil
 }
@@ -138,6 +141,48 @@ func scanLibrary(
 		systems[lib.System]++
 		return nil
 	})
+}
+
+func catalogRevision(cfg config.Config, entries map[string]Entry) string {
+	h := sha256.New()
+
+	libs := append([]config.Library(nil), cfg.Libraries...)
+	sort.Slice(libs, func(i, j int) bool {
+		if libs[i].System != libs[j].System {
+			return libs[i].System < libs[j].System
+		}
+		return strings.ToLower(libs[i].Name) < strings.ToLower(libs[j].Name)
+	})
+	for _, lib := range libs {
+		fmt.Fprintf(h, "L\x00%s\x00%s\x00%t\x00", lib.Name, lib.System, lib.Recursive)
+		exts := append([]string(nil), lib.Extensions...)
+		sort.Strings(exts)
+		for _, ext := range exts {
+			fmt.Fprintf(h, "%s\x00", ext)
+		}
+	}
+
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		entry := entries[id]
+		fmt.Fprintf(
+			h, "E\x00%s\x00%d\x00%d\x00",
+			id, entry.Size, entry.ModifiedAt.UnixNano(),
+		)
+	}
+
+	sum := h.Sum(nil)
+	return `"catalog-` + hex.EncodeToString(sum[:16]) + `"`
+}
+
+func (c *Catalog) Revision() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.revision
 }
 
 func stableID(library, system, relative string) string {
