@@ -81,6 +81,10 @@ func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 		`"range_requests":1`,
 		`"full_get_requests":0`,
 		`"bytes_served":4`,
+		`"range_bytes_served":4`,
+		`"full_get_bytes_served":0`,
+		`"file_request_duration_us_total":`,
+		`"file_request_duration_us_max":`,
 		`"not_found":0`,
 		`"errors":0`,
 	} {
@@ -137,6 +141,10 @@ func TestTransportMetricsResetRequiresTokenAndClearsCounters(t *testing.T) {
 		`"file_get_requests":0`,
 		`"range_requests":0`,
 		`"bytes_served":0`,
+		`"range_bytes_served":0`,
+		`"full_get_bytes_served":0`,
+		`"file_request_duration_us_total":0`,
+		`"file_request_duration_us_max":0`,
 		`"errors":0`,
 	} {
 		if !strings.Contains(metricsRec.Body.String(), want) {
