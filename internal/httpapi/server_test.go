@@ -97,6 +97,62 @@ func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 	}
 }
 
+func TestTransportMetricsResetRequiresTokenAndClearsCounters(t *testing.T) {
+	unsecured, unsecuredEntry := testServer(t, "")
+	rangeReq := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+unsecuredEntry.ID, nil)
+	rangeReq.Header.Set("Range", "bytes=0-1")
+	rangeRec := httptest.NewRecorder()
+	unsecured.Handler().ServeHTTP(rangeRec, rangeReq)
+
+	resetReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/metrics/reset", nil)
+	resetRec := httptest.NewRecorder()
+	unsecured.Handler().ServeHTTP(resetRec, resetReq)
+	if resetRec.Code != http.StatusForbidden {
+		t.Fatalf("unsecured reset status=%d want 403", resetRec.Code)
+	}
+
+	secured, entry := testServer(t, "secret")
+	rangeReq = httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	rangeReq.Header.Set("Authorization", "Bearer secret")
+	rangeReq.Header.Set("Range", "bytes=0-1")
+	rangeRec = httptest.NewRecorder()
+	secured.Handler().ServeHTTP(rangeRec, rangeReq)
+	if rangeRec.Code != http.StatusPartialContent {
+		t.Fatalf("secured range status=%d", rangeRec.Code)
+	}
+
+	resetReq = httptest.NewRequest(http.MethodPost, "/api/v1/admin/metrics/reset", nil)
+	resetReq.Header.Set("Authorization", "Bearer secret")
+	resetRec = httptest.NewRecorder()
+	secured.Handler().ServeHTTP(resetRec, resetReq)
+	if resetRec.Code != http.StatusOK {
+		t.Fatalf("secured reset status=%d body=%s", resetRec.Code, resetRec.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsReq.Header.Set("Authorization", "Bearer secret")
+	metricsRec := httptest.NewRecorder()
+	secured.Handler().ServeHTTP(metricsRec, metricsReq)
+	for _, want := range []string{
+		`"file_get_requests":0`,
+		`"range_requests":0`,
+		`"bytes_served":0`,
+		`"errors":0`,
+	} {
+		if !strings.Contains(metricsRec.Body.String(), want) {
+			t.Fatalf("reset metrics missing %s: %s", want, metricsRec.Body.String())
+		}
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthReq.Header.Set("Authorization", "Bearer secret")
+	healthRec := httptest.NewRecorder()
+	secured.Handler().ServeHTTP(healthRec, healthReq)
+	if !strings.Contains(healthRec.Body.String(), `"transport_metrics_reset":true`) {
+		t.Fatalf("secured health did not advertise metrics reset: %s", healthRec.Body.String())
+	}
+}
+
 func TestHeadAndCatalogDoNotExposeHostPath(t *testing.T) {
 	server, entry := testServer(t, "")
 
