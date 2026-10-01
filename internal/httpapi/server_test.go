@@ -88,3 +88,65 @@ func TestBearerToken(t *testing.T) {
 		t.Fatalf("status=%d want 200", rec.Code)
 	}
 }
+
+
+func TestAnchoredSidecarRead(t *testing.T) {
+	root := t.TempDir()
+	gameDir := filepath.Join(root, "game")
+	if err := os.MkdirAll(gameDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gameDir, "disc.cue"), []byte("FILE \"track.bin\" BINARY\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gameDir, "track.bin"), []byte("TRACK-DATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat, err := catalog.New(config.Config{Libraries: []config.Library{{
+		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".cue", ".bin"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cue catalog.Entry
+	for _, entry := range cat.Entries("ps1") {
+		if entry.Name == "disc.cue" {
+			cue = entry
+			break
+		}
+	}
+	if cue.ID == "" {
+		t.Fatal("cue anchor not found")
+	}
+
+	server := New(cat, "")
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/files/"+cue.ID+"?path=track.bin",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "TRACK-DATA" {
+		t.Fatalf("sidecar body=%q", rec.Body.String())
+	}
+	if rec.Header().Get("X-Emu-Relative-Path") != "game/track.bin" {
+		t.Fatalf("unexpected resolved path %q", rec.Header().Get("X-Emu-Relative-Path"))
+	}
+
+	escape := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/files/"+cue.ID+"?path=../../outside.bin",
+		nil,
+	)
+	escapeRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(escapeRec, escape)
+	if escapeRec.Code != http.StatusNotFound {
+		t.Fatalf("escape status=%d want 404", escapeRec.Code)
+	}
+}
