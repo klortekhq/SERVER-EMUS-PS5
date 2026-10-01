@@ -25,6 +25,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/health", s.health)
 	mux.HandleFunc("/api/v1/systems", s.systems)
 	mux.HandleFunc("/api/v1/libraries", s.libraries)
+	mux.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
 	mux.HandleFunc("/api/v1/games", s.games)
 	mux.HandleFunc("/api/v1/files/", s.file)
 	return s.auth(mux)
@@ -76,6 +77,33 @@ func (s *Server) libraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.catalog.Libraries())
+}
+
+func (s *Server) rebuildCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	// Read-only streaming may deliberately run without authentication on a
+	// trusted LAN. Administrative mutations never do: require a configured
+	// bearer token before exposing a remote rescan trigger.
+	if s.token == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "catalog rebuild is disabled without a bearer token",
+		})
+		return
+	}
+	if err := s.catalog.Rebuild(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "catalog rebuild failed",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"systems":   s.catalog.Systems(),
+		"libraries": s.catalog.Libraries(),
+	})
 }
 
 func (s *Server) games(w http.ResponseWriter, r *http.Request) {
