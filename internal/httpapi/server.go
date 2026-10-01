@@ -17,14 +17,18 @@ import (
 )
 
 type transportMetrics struct {
-	fileGetRequests  atomic.Uint64
-	fileHeadRequests atomic.Uint64
-	rangeRequests    atomic.Uint64
-	fullGetRequests  atomic.Uint64
-	sidecarRequests  atomic.Uint64
-	bytesServed      atomic.Uint64
-	notFound         atomic.Uint64
-	errors           atomic.Uint64
+	fileGetRequests        atomic.Uint64
+	fileHeadRequests       atomic.Uint64
+	rangeRequests          atomic.Uint64
+	fullGetRequests        atomic.Uint64
+	sidecarRequests        atomic.Uint64
+	bytesServed            atomic.Uint64
+	rangeBytesServed       atomic.Uint64
+	fullGetBytesServed     atomic.Uint64
+	fileDurationMicros     atomic.Uint64
+	fileDurationMicrosMax  atomic.Uint64
+	notFound               atomic.Uint64
+	errors                 atomic.Uint64
 }
 
 func (m *transportMetrics) reset() {
@@ -34,8 +38,21 @@ func (m *transportMetrics) reset() {
 	m.fullGetRequests.Store(0)
 	m.sidecarRequests.Store(0)
 	m.bytesServed.Store(0)
+	m.rangeBytesServed.Store(0)
+	m.fullGetBytesServed.Store(0)
+	m.fileDurationMicros.Store(0)
+	m.fileDurationMicrosMax.Store(0)
 	m.notFound.Store(0)
 	m.errors.Store(0)
+}
+
+func atomicMax(target *atomic.Uint64, value uint64) {
+	for {
+		current := target.Load()
+		if value <= current || target.CompareAndSwap(current, value) {
+			return
+		}
+	}
 }
 
 type Server struct {
@@ -145,10 +162,14 @@ func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
 		"file_head_requests": s.metrics.fileHeadRequests.Load(),
 		"range_requests":     s.metrics.rangeRequests.Load(),
 		"full_get_requests":  s.metrics.fullGetRequests.Load(),
-		"sidecar_requests":   s.metrics.sidecarRequests.Load(),
-		"bytes_served":       s.metrics.bytesServed.Load(),
-		"not_found":          s.metrics.notFound.Load(),
-		"errors":             s.metrics.errors.Load(),
+		"sidecar_requests":              s.metrics.sidecarRequests.Load(),
+		"bytes_served":                  s.metrics.bytesServed.Load(),
+		"range_bytes_served":            s.metrics.rangeBytesServed.Load(),
+		"full_get_bytes_served":         s.metrics.fullGetBytesServed.Load(),
+		"file_request_duration_us_total": s.metrics.fileDurationMicros.Load(),
+		"file_request_duration_us_max":   s.metrics.fileDurationMicrosMax.Load(),
+		"not_found":                     s.metrics.notFound.Load(),
+		"errors":                        s.metrics.errors.Load(),
 	})
 }
 
@@ -315,8 +336,25 @@ func (w *metricResponseWriter) Write(p []byte) (int, error) {
 
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	mw := &metricResponseWriter{ResponseWriter: w}
+	started := time.Now()
 	defer func() {
 		s.metrics.bytesServed.Add(mw.bytes)
+		if r.Method == http.MethodGet {
+			if r.Header.Get("Range") != "" {
+				s.metrics.rangeBytesServed.Add(mw.bytes)
+			} else {
+				s.metrics.fullGetBytesServed.Add(mw.bytes)
+			}
+		}
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			elapsed := time.Since(started)
+			if elapsed < 0 {
+				elapsed = 0
+			}
+			micros := uint64(elapsed / time.Microsecond)
+			s.metrics.fileDurationMicros.Add(micros)
+			atomicMax(&s.metrics.fileDurationMicrosMax, micros)
+		}
 		if mw.status == http.StatusNotFound {
 			s.metrics.notFound.Add(1)
 		}
