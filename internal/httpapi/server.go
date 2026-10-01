@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -155,7 +156,8 @@ func (s *Server) replaceLibraries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid library configuration"})
 		return
 	}
-	if decoder.More() {
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid library configuration"})
 		return
 	}
