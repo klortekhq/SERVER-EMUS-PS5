@@ -27,6 +27,17 @@ type transportMetrics struct {
 	errors           atomic.Uint64
 }
 
+func (m *transportMetrics) reset() {
+	m.fileGetRequests.Store(0)
+	m.fileHeadRequests.Store(0)
+	m.rangeRequests.Store(0)
+	m.fullGetRequests.Store(0)
+	m.sidecarRequests.Store(0)
+	m.bytesServed.Store(0)
+	m.notFound.Store(0)
+	m.errors.Store(0)
+}
+
 type Server struct {
 	catalog    *catalog.Catalog
 	token      string
@@ -59,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", s.health)
 	mux.HandleFunc("/api/v1/metrics", s.transportMetrics)
+	mux.HandleFunc("/api/v1/admin/metrics/reset", s.resetTransportMetrics)
 	mux.HandleFunc("/api/v1/systems", s.systems)
 	mux.HandleFunc("/api/v1/libraries", s.libraries)
 	mux.HandleFunc("/api/v1/catalog/rebuild", s.rebuildCatalog)
@@ -105,6 +117,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"catalog_rebuild":           s.token != "",
 			"library_editing":           s.token != "" && s.configPath != "",
 			"transport_metrics":          true,
+			"transport_metrics_reset":    s.token != "",
 		},
 	})
 }
@@ -129,6 +142,24 @@ func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
 		"bytes_served":       s.metrics.bytesServed.Load(),
 		"not_found":          s.metrics.notFound.Load(),
 		"errors":             s.metrics.errors.Load(),
+	})
+}
+
+func (s *Server) resetTransportMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.token == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "transport metrics reset is disabled without a bearer token",
+		})
+		return
+	}
+
+	s.metrics.reset()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
 	})
 }
 
