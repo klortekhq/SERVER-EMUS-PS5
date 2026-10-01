@@ -70,6 +70,27 @@ func TestHeadAndCatalogDoNotExposeHostPath(t *testing.T) {
 	}
 }
 
+func TestLibrariesEndpointDoesNotExposeHostPaths(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/libraries", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, entry.HostPath) || strings.Contains(body, filepath.Dir(entry.HostPath)) {
+		t.Fatal("libraries endpoint leaked physical host path")
+	}
+	for _, want := range []string{`"name":"PS1"`, `"system":"ps1"`, `"files":1`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("libraries response missing %s: %s", want, body)
+		}
+	}
+}
+
 func TestBearerToken(t *testing.T) {
 	server, _ := testServer(t, "secret")
 
