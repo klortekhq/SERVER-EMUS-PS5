@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -148,12 +149,39 @@ func Save(path string, cfg Config) error {
 		return fmt.Errorf("close config: %w", err)
 	}
 
-	// Windows does not allow rename-over-existing in the same way as Unix.
-	// Remove only after the fully-written temp file is safely closed.
-	_ = os.Remove(path)
+	if runtime.GOOS != "windows" {
+		// Same-directory rename replaces atomically on Unix.
+		if err := os.Rename(tmpName, path); err != nil {
+			return fmt.Errorf("replace config: %w", err)
+		}
+		ok = true
+		return nil
+	}
+
+	// Windows rename-over-existing semantics are different. Preserve the old
+	// configuration as a same-directory backup until the new file is in place
+	// so a failed replacement cannot silently destroy the working config.
+	backup := path + ".bak"
+	_ = os.Remove(backup)
+	hadOld := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backup); err != nil {
+			return fmt.Errorf("backup existing config: %w", err)
+		}
+		hadOld = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat existing config: %w", err)
+	}
+
 	if err := os.Rename(tmpName, path); err != nil {
+		if hadOld {
+			_ = os.Rename(backup, path)
+		}
 		return fmt.Errorf("replace config: %w", err)
 	}
 	ok = true
+	if hadOld {
+		_ = os.Remove(backup)
+	}
 	return nil
 }
