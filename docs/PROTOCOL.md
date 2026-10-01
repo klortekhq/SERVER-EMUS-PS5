@@ -19,7 +19,7 @@ ps5rt lo traduce internamente a:
 http://192.168.1.50:8787/api/v1/files/<file-id>
 ~~~
 
-El ID procede del catálogo y no contiene la ruta física del servidor. El sufijo de nombre es metadato para conservar la extensión que necesita el emulador; `ps5rt` no lo usa para resolver el archivo en el servidor.
+El ID procede del catálogo y no contiene la ruta física del servidor. El sufijo es una **ruta virtual relativa** anclada al directorio de ese ID. `ps5rt` la codifica al transportar la petición y el servidor la resuelve únicamente dentro de la misma biblioteca configurada. Esto permite que CUE/CCD/TOC/M3U abran BIN/IMG/SUB/discos relativos sin SMB ni rutas físicas del NAS.
 
 ### Descubrimiento
 
@@ -39,7 +39,17 @@ El segundo endpoint devuelve entradas con:
 - modified_at
 - etag
 
-Nunca devuelve la ruta física real.
+Nunca devuelve la ruta física real. Las extensiones configuradas determinan qué archivos aparecen como juegos lanzables; los sidecars referenciados por un descriptor no necesitan aparecer en el catálogo.
+
+### Rutas virtuales y sidecars
+
+Para un CUE catalogado como `Juego.cue`, el arranque puede usar:
+
+~~~text
+emus://192.168.1.50:8787/<cue-id>/Juego.cue
+~~~
+
+Si el CUE abre `tracks/track01.bin`, el VFS conserva el mismo ID ancla y solicita virtualmente `tracks/track01.bin`. El servidor resuelve esa ruta desde el directorio del CUE y rechaza cualquier resolución que salga de la biblioteca, también a través de symlinks. El mismo mecanismo cubre listas M3U y formatos con archivos compañeros.
 
 ### Apertura
 
@@ -114,7 +124,7 @@ ps5rt translates it internally to:
 http://192.168.1.50:8787/api/v1/files/<file-id>
 ~~~
 
-The ID comes from the catalog and does not expose a physical server path. The trailing file name is metadata used to preserve the extension expected by emulator cores; `ps5rt` never uses it to resolve the host file.
+The ID comes from the catalog and does not expose a physical server path. The trailing suffix is a **virtual relative path** anchored at that catalog entry's directory. `ps5rt` transports it encoded and the server resolves it only inside the same configured library. This allows CUE/CCD/TOC/M3U content to open relative BIN/IMG/SUB/disc sidecars without SMB or NAS host paths.
 
 ### Discovery
 
@@ -123,7 +133,11 @@ GET /api/v1/systems
 GET /api/v1/games?system=ps1
 ~~~
 
-Game entries expose only catalog metadata and never the host physical path.
+Game entries expose only catalog metadata and never the host physical path. Configured extensions control launchable catalog entries; descriptor sidecars do not need to be listed as launchable extensions.
+
+### Virtual paths and sidecars
+
+A descriptor keeps one opaque anchor ID. Relative files requested by the emulator are forwarded as virtual paths under that anchor. The server resolves them from the descriptor directory and rejects targets that escape the configured library, including symlink escapes. This supports multi-file and multi-disc layouts without adding sidecar files to the games catalog.
 
 ### Open
 
