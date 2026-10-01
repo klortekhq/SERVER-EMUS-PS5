@@ -94,6 +94,7 @@ En Windows el mismo campo puede ser, por ejemplo:
 
 - GET /api/v1/health
 - GET /api/v1/systems
+- GET /api/v1/libraries
 - GET /api/v1/games?system=ps1
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
@@ -184,6 +185,7 @@ See config.example.json. Paths use the host operating system's native path synta
 
 - GET /api/v1/health
 - GET /api/v1/systems
+- GET /api/v1/libraries
 - GET /api/v1/games?system=ps1
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
@@ -230,7 +232,8 @@ Portable-build run **36839534917** produces six standalone artifacts:
 - macOS amd64
 - macOS arm64
 
-The remaining MVP work is the library-management UI/API, physical-PS5
+The read-only, path-free library metadata API is implemented. The remaining
+MVP management work is the authenticated library-editing UI/API, physical-PS5
 `emus://` validation, reconnect/prefetch tuning and real LAN benchmarks
 against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
