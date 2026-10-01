@@ -1,12 +1,12 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/klortekhq/server-emus-ps5/internal/catalog"
 )
@@ -36,7 +36,12 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		const prefix = "Bearer "
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, prefix) || strings.TrimSpace(strings.TrimPrefix(header, prefix)) != s.token {
+		if !strings.HasPrefix(header, prefix) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -85,7 +90,8 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, entry, err := s.catalog.Open(id)
+	virtualPath := r.URL.Query().Get("path")
+	f, entry, err := s.catalog.OpenVirtual(id, virtualPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.NotFound(w, r)
@@ -101,6 +107,9 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", entry.ETag)
 	w.Header().Set("X-Emu-System", entry.System)
 	w.Header().Set("X-Emu-Library", entry.Library)
+	if virtualPath != "" {
+		w.Header().Set("X-Emu-Relative-Path", entry.RelativePath)
+	}
 
 	http.ServeContent(w, r, entry.Name, entry.ModifiedAt, f)
 }
@@ -116,5 +125,3 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
-
-var _ = time.Time{}
