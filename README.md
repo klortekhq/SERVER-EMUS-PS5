@@ -40,6 +40,7 @@ rangos de bytes concretos, igual que haría con un archivo local.
 - varias carpetas por sistema;
 - una carpeta puede estar en disco local, array, USB o almacenamiento montado por el SO;
 - catálogo común para todas las consolas;
+- sidecars relativos de CUE/CCD/TOC/M3U sin mostrarlos como juegos;
 - acceso aleatorio con peticiones HTTP Range;
 - HEAD para tamaño/ETag sin transferir datos;
 - rutas físicas nunca expuestas al cliente;
@@ -98,8 +99,11 @@ En Windows el mismo campo puede ser, por ejemplo:
 - HEAD /api/v1/files/{id}
 - Range: bytes=start-end soportado por el endpoint de archivo
 
-El ID es un hash estable derivado de la biblioteca y la ruta relativa. El cliente
-no puede solicitar rutas arbitrarias del host.
+El ID es un hash estable derivado de la biblioteca y la ruta relativa. El sufijo
+opcional de `emus://host/id/ruta` se usa como ruta virtual relativa para
+sidecars del descriptor. El servidor la resuelve dentro de la misma biblioteca
+y rechaza escapes, incluidos los producidos por symlinks. El cliente nunca
+puede solicitar una ruta física arbitraria del host.
 
 Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -148,6 +152,7 @@ can request exact byte ranges just like a local random-access file.
 - macOS Intel/Apple Silicon;
 - multiple folders per system;
 - common catalog for every console/system;
+- relative CUE/CCD/TOC/M3U sidecars without listing them as games;
 - random access using HTTP Range;
 - HEAD for size/ETag without transferring content;
 - never expose physical host paths to clients;
@@ -184,8 +189,11 @@ See config.example.json. Paths use the host operating system's native path synta
 - HEAD /api/v1/files/{id}
 - file endpoint supports standard Range: bytes=start-end
 
-File IDs are stable hashes derived from the library and relative path. Clients
-cannot request arbitrary server paths.
+File IDs are stable hashes derived from the library and relative path. The
+optional `emus://host/id/path` suffix is an anchored virtual path used for
+descriptor sidecars. The server resolves it only inside the same configured
+library and rejects path/symlink escapes. Clients cannot request arbitrary host
+paths.
 
 Full specification: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -222,6 +230,7 @@ Portable-build run **36839534917** produces six standalone artifacts:
 - macOS amd64
 - macOS arm64
 
-The remaining MVP work is the library-management UI/API, native PS5
-`emus://` client validation, reconnect/prefetch tuning and real LAN benchmarks
-against SMB.
+The remaining MVP work is the library-management UI/API, physical-PS5
+`emus://` validation, reconnect/prefetch tuning and real LAN benchmarks
+against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
+layouts can stay portable without polluting the games catalog.
