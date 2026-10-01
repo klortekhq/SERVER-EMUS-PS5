@@ -153,7 +153,8 @@ mismo ETag.
 
 `GET /api/v1/metrics` expone únicamente telemetría de transporte sin rutas:
 uptime, GET/HEAD de archivos, peticiones Range, GET completos, sidecars, bytes
-servidos, 404 y errores. Está pensado para medir patrones reales de emulación y
+servidos totales y separados por Range/GET completo, latencia acumulada y
+máxima de requests de archivo, 404 y errores. Está pensado para medir patrones reales de emulación y
 comparar read-ahead/cache/EMUS frente a SMB antes de afirmar mejoras de
 rendimiento. Con bearer token, `POST /api/v1/admin/metrics/reset` pone los
 contadores a cero para iniciar una prueba independiente.
@@ -317,6 +318,7 @@ persistent config replacement and live catalog swapping. The built-in
 dependency-free WebUI is implemented and verified on Linux, Windows and macOS
 while keeping all API routes behind the existing bearer boundary. Path-free
 transport metrics plus authenticated reset provide clean samples for PS5
-benchmarks. The remaining work is physical-PS5 `emus://` validation,
+benchmarks, including Range/full-GET byte totals and cumulative/max file-request
+latency. The remaining work is physical-PS5 `emus://` validation,
 measured prefetch tuning and real LAN benchmarks against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
