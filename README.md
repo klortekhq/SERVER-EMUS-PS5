@@ -93,6 +93,7 @@ En Windows el mismo campo puede ser, por ejemplo:
 ### API v1
 
 - GET /api/v1/health
+- GET /api/v1/metrics
 - GET /api/v1/systems
 - GET /api/v1/libraries
 - POST /api/v1/catalog/rebuild
@@ -124,6 +125,12 @@ pueden enviar `If-None-Match` a `/systems`, `/libraries` o `/games`; si
 nada cambió el servidor responde `304 Not Modified` sin reenviar el JSON. La
 revisión no contiene rutas físicas del NAS y un rescan sin cambios conserva el
 mismo ETag.
+
+`GET /api/v1/metrics` expone únicamente telemetría de transporte sin rutas:
+uptime, GET/HEAD de archivos, peticiones Range, GET completos, sidecars, bytes
+servidos, 404 y errores. Está pensado para medir patrones reales de emulación y
+comparar read-ahead/cache/EMUS frente a SMB antes de afirmar mejoras de
+rendimiento.
 
 Especificación completa: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
@@ -203,6 +210,7 @@ See config.example.json. Paths use the host operating system's native path synta
 ### API v1
 
 - GET /api/v1/health
+- GET /api/v1/metrics
 - GET /api/v1/systems
 - GET /api/v1/libraries
 - POST /api/v1/catalog/rebuild
@@ -266,8 +274,10 @@ metadata, not physical NAS paths. Periodic rescans therefore keep the same ETag
 when nothing relevant changed.
 
 The authenticated library-editing API is implemented with pre-validation,
-persistent config replacement and live catalog swapping. The remaining
-management work is the UI/WebUI for that API, physical-PS5
-`emus://` validation, reconnect/prefetch tuning and real LAN benchmarks
+persistent config replacement and live catalog swapping. Path-free transport
+metrics are also implemented and green across CI/portable builds, giving
+physical-PS5 tests counters for Range requests and transferred bytes. The
+remaining management work is the UI/WebUI for that API, physical-PS5
+`emus://` validation, measured prefetch tuning and real LAN benchmarks
 against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
