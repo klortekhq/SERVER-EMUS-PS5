@@ -127,6 +127,7 @@ Como las APIs de descubrimiento nunca devuelven paths físicos, la plantilla dej
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
 - Range: bytes=start-end soportado por el endpoint de archivo
+- multi-range HTTP estándar para agrupar hasta 16 lecturas discontiguas en una petición
 
 El catálogo admite metadatos opcionales por juego en sidecars locales
 `.emus.json`: identificadores específicos de consola, referencias, arte y
@@ -266,6 +267,7 @@ deliberately never return them.
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
 - file endpoint supports standard Range: bytes=start-end
+- standard HTTP multi-range groups up to 16 discontiguous reads in one request
 
 The catalog accepts optional per-game metadata from local `.emus.json`
 sidecars: platform-specific identifiers, references, artwork and cheat

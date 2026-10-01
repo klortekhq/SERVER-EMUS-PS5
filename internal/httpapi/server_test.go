@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,6 +81,7 @@ func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 		`"file_get_requests":1`,
 		`"file_head_requests":1`,
 		`"range_requests":1`,
+		`"multi_range_requests":0`,
 		`"full_get_requests":0`,
 		`"bytes_served":4`,
 		`"range_bytes_served":4`,
@@ -123,6 +126,7 @@ func TestTransportMetricsClassifiesStaleIfRangeFallbackAsFullGet(t *testing.T) {
 	for _, want := range []string{
 		`"file_get_requests":1`,
 		`"range_requests":1`,
+		`"multi_range_requests":0`,
 		`"full_get_requests":1`,
 		`"bytes_served":10`,
 		`"range_bytes_served":0`,
@@ -173,6 +177,7 @@ func TestTransportMetricsResetRequiresTokenAndClearsCounters(t *testing.T) {
 	for _, want := range []string{
 		`"file_get_requests":0`,
 		`"range_requests":0`,
+		`"multi_range_requests":0`,
 		`"bytes_served":0`,
 		`"range_bytes_served":0`,
 		`"full_get_bytes_served":0`,
@@ -375,6 +380,8 @@ func TestHealthCapabilities(t *testing.T) {
 		`"service":"SERVER-EMUS-PS5"`,
 		`"api":"v1"`,
 		`"byte_ranges":true`,
+		`"multi_ranges":true`,
+		`"max_range_parts":16`,
 		`"anchored_virtual_sidecars":true`,
 		`"catalog_discovery":true`,
 		`"catalog_etag":true`,
@@ -657,5 +664,84 @@ func TestManagedLibraryReplacementRejectsInvalidPathWithoutMutation(t *testing.T
 	}
 	if string(after) != string(before) {
 		t.Fatal("invalid library request mutated persisted config")
+	}
+}
+
+func TestMultiRangeReadUsesMultipartResponse(t *testing.T) {
+	server, entry := testServer(t, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	req.Header.Set("Range", "bytes=0-1,8-9")
+	rec := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	mediaType, params, err := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mediaType != "multipart/byteranges" {
+		t.Fatalf("content type=%q", mediaType)
+	}
+
+	reader := multipart.NewReader(rec.Result().Body, params["boundary"])
+	var payloads []string
+	var ranges []string
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(part)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payloads = append(payloads, string(body))
+		ranges = append(ranges, part.Header.Get("Content-Range"))
+	}
+
+	if len(payloads) != 2 ||
+		payloads[0] != "01" ||
+		payloads[1] != "89" {
+		t.Fatalf("multipart payloads=%q", payloads)
+	}
+	if len(ranges) != 2 ||
+		ranges[0] != "bytes 0-1/10" ||
+		ranges[1] != "bytes 8-9/10" {
+		t.Fatalf("multipart ranges=%q", ranges)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	if !strings.Contains(metricsRec.Body.String(), `"multi_range_requests":1`) {
+		t.Fatalf("multi-range metric missing: %s", metricsRec.Body.String())
+	}
+}
+
+func TestMultiRangeReadRejectsExcessiveParts(t *testing.T) {
+	server, entry := testServer(t, "")
+	parts := make([]string, maxRangeParts+1)
+	for i := range parts {
+		parts[i] = strconv.Itoa(i) + "-" + strconv.Itoa(i)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	req.Header.Set("Range", "bytes="+strings.Join(parts, ","))
+	rec := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"max_range_parts":16`) {
+		t.Fatalf("limit response missing: %s", rec.Body.String())
 	}
 }

@@ -25,7 +25,8 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 
 `GET /api/v1/health` devuelve `service`, `api` y un bloque
 `capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
-`anchored_virtual_sidecars`, `catalog_discovery`, `catalog_etag`,
+`multi_ranges`, `max_range_parts`, `anchored_virtual_sidecars`,
+`catalog_discovery`, `catalog_etag`,
 `catalog_rebuild`, `transport_metrics`, `web_admin` y, cuando hay token,
 `transport_metrics_reset`.
 
@@ -206,6 +207,26 @@ Content-Range: bytes 1048576-1572863/TOTAL
 Content-Length: 524288
 ~~~
 
+### Lectura vectorizada con multi-range
+
+EMUS v1 también acepta el mecanismo HTTP estándar de rangos múltiples:
+
+~~~http
+GET /api/v1/files/<id>
+Range: bytes=0-65535,1048576-1114111
+If-Range: "<etag>"
+~~~
+
+Cuando ambos rangos son válidos, la respuesta es `206 Partial Content` con
+`Content-Type: multipart/byteranges`. Esto permite que un cliente agrupe
+lecturas discontiguas/prefetch en un solo round-trip sin introducir un segundo
+protocolo binario propietario.
+
+El servidor limita cada petición a **16 rangos** para acotar memoria/overhead.
+La capacidad se anuncia como `multi_ranges: true` y el límite actual como
+`max_range_parts: 16`. Un cliente debe seguir aceptando el camino normal de
+un solo Range y no asumir que multi-range existe sin negociar `/health`.
+
 Un cliente no debe asumir que toda lectura devuelve el tamaño solicitado:
 EOF, cambios en el archivo o un error de red pueden producir una lectura más corta.
 
@@ -222,6 +243,7 @@ Devuelve contadores acumulados desde el arranque. `range_requests` cuenta intent
 - `file_get_requests`;
 - `file_head_requests`;
 - `range_requests`;
+- `multi_range_requests`;
 - `full_get_requests`;
 - `sidecar_requests`;
 - `bytes_served`;

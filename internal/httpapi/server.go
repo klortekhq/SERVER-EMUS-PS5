@@ -16,10 +16,13 @@ import (
 	"github.com/klortekhq/server-emus-ps5/internal/config"
 )
 
+const maxRangeParts = 16
+
 type transportMetrics struct {
 	fileGetRequests        atomic.Uint64
 	fileHeadRequests       atomic.Uint64
 	rangeRequests          atomic.Uint64
+	multiRangeRequests     atomic.Uint64
 	fullGetRequests        atomic.Uint64
 	sidecarRequests        atomic.Uint64
 	bytesServed            atomic.Uint64
@@ -35,6 +38,7 @@ func (m *transportMetrics) reset() {
 	m.fileGetRequests.Store(0)
 	m.fileHeadRequests.Store(0)
 	m.rangeRequests.Store(0)
+	m.multiRangeRequests.Store(0)
 	m.fullGetRequests.Store(0)
 	m.sidecarRequests.Store(0)
 	m.bytesServed.Store(0)
@@ -134,6 +138,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		"api":     "v1",
 		"capabilities": map[string]any{
 			"byte_ranges":               true,
+			"multi_ranges":              true,
+			"max_range_parts":           maxRangeParts,
 			"anchored_virtual_sidecars": true,
 			"catalog_discovery":         true,
 			"catalog_etag":              true,
@@ -160,8 +166,9 @@ func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":     uint64(uptime / time.Second),
 		"file_get_requests":  s.metrics.fileGetRequests.Load(),
 		"file_head_requests": s.metrics.fileHeadRequests.Load(),
-		"range_requests":     s.metrics.rangeRequests.Load(),
-		"full_get_requests":  s.metrics.fullGetRequests.Load(),
+		"range_requests":       s.metrics.rangeRequests.Load(),
+		"multi_range_requests": s.metrics.multiRangeRequests.Load(),
+		"full_get_requests":    s.metrics.fullGetRequests.Load(),
 		"sidecar_requests":              s.metrics.sidecarRequests.Load(),
 		"bytes_served":                  s.metrics.bytesServed.Load(),
 		"range_bytes_served":            s.metrics.rangeBytesServed.Load(),
@@ -369,11 +376,24 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
 		s.metrics.fileGetRequests.Add(1)
-		if r.Header.Get("Range") != "" {
+		if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
 			// Range requests count client attempts. full_get_requests counts
 			// successful complete 200 responses after ServeContent resolves
 			// validators such as If-Range.
 			s.metrics.rangeRequests.Add(1)
+
+			parts := rangePartCount(rangeHeader)
+			if parts > 1 {
+				s.metrics.multiRangeRequests.Add(1)
+			}
+			if parts > maxRangeParts {
+				mw.Header().Set("Content-Range", "bytes */*")
+				writeJSON(mw, http.StatusRequestedRangeNotSatisfiable, map[string]any{
+					"error":           "too many byte ranges",
+					"max_range_parts": maxRangeParts,
+				})
+				return
+			}
 		}
 	} else if r.Method == http.MethodHead {
 		s.metrics.fileHeadRequests.Add(1)
@@ -455,4 +475,19 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func rangePartCount(header string) int {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	if !strings.HasPrefix(strings.ToLower(header), "bytes=") {
+		return 1
+	}
+	value := strings.TrimSpace(header[len("bytes="):])
+	if value == "" {
+		return 1
+	}
+	return strings.Count(value, ",") + 1
 }
