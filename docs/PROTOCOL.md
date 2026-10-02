@@ -25,7 +25,8 @@ El ID procede del catálogo y no contiene la ruta física del servidor. El sufij
 
 `GET /api/v1/health` devuelve `service`, `api` y un bloque
 `capabilities`. En v1 se anuncian explícitamente `byte_ranges`,
-`multi_ranges`, `max_range_parts`, `anchored_virtual_sidecars`,
+`multi_ranges`, `max_range_parts`, `max_range_header_bytes`, `max_virtual_path_bytes`,
+`anchored_virtual_sidecars`,
 `catalog_discovery`, `catalog_etag`,
 `catalog_rebuild`, `transport_metrics`, `web_admin` y, cuando hay token,
 `transport_metrics_reset`.

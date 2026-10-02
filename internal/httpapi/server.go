@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	maxRangeParts       = 16
-	maxRangeHeaderBytes = 8 << 10
+	maxRangeParts        = 16
+	maxRangeHeaderBytes  = 8 << 10
+	maxVirtualPathBytes  = 4 << 10
 )
 
 type transportMetrics struct {
@@ -148,6 +149,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"multi_ranges":              true,
 			"max_range_parts":           maxRangeParts,
 			"max_range_header_bytes":    maxRangeHeaderBytes,
+			"max_virtual_path_bytes":    maxVirtualPathBytes,
 			"anchored_virtual_sidecars": true,
 			"catalog_discovery":         true,
 			"catalog_etag":              true,
@@ -437,6 +439,13 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	}
 
 	virtualPath := r.URL.Query().Get("path")
+	if len(virtualPath) > maxVirtualPathBytes {
+		writeJSON(mw, http.StatusBadRequest, map[string]any{
+			"error":                  "virtual sidecar path too long",
+			"max_virtual_path_bytes": maxVirtualPathBytes,
+		})
+		return
+	}
 	if virtualPath != "" {
 		s.metrics.sidecarRequests.Add(1)
 	}

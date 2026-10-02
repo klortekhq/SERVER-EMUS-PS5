@@ -558,6 +558,30 @@ func TestBearerToken(t *testing.T) {
 }
 
 
+func TestAnchoredSidecarRejectsOversizedVirtualPath(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/files/"+entry.ID+"?path="+strings.Repeat("a", maxVirtualPathBytes+1),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`"error":"virtual sidecar path too long"`,
+		`"max_virtual_path_bytes":4096`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("limit response missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
 func TestAnchoredSidecarRead(t *testing.T) {
 	root := t.TempDir()
 	gameDir := filepath.Join(root, "game")
