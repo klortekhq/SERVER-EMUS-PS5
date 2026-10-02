@@ -127,6 +127,7 @@ Como las APIs de descubrimiento nunca devuelven paths físicos, la plantilla dej
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
 - Range: bytes=start-end soportado por el endpoint de archivo
+- `If-Match` estricto para abortar con 412 si cambia el ETag en vez de descargar el archivo completo
 - multi-range HTTP estándar para agrupar hasta 16 lecturas discontiguas en una petición
 - límite específico de 8192 bytes para el campo `Range`, rechazando antes de parsear cabeceras abusivas
 
@@ -268,6 +269,7 @@ deliberately never return them.
 - GET /api/v1/files/{id}
 - HEAD /api/v1/files/{id}
 - file endpoint supports standard Range: bytes=start-end
+- strict `If-Match` can fail stale sessions with 412 instead of returning the whole file
 - standard HTTP multi-range groups up to 16 discontiguous reads in one request
 - an 8192-byte application limit on the `Range` field rejects abusive values before parsing
 

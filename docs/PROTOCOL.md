@@ -207,6 +207,14 @@ Content-Range: bytes 1048576-1572863/TOTAL
 Content-Length: 524288
 ~~~
 
+Para una sesión de emulación que exige que la imagen remota no cambie durante
+la ejecución, el cliente puede usar `If-Match: "<etag>"` junto con `Range`.
+Si el ETag ya no coincide, el servidor responde `412 Precondition Failed`
+sin convertir la petición en una descarga completa. Esto evita el fallback
+estándar de `If-Range`, que ante un validador obsoleto puede responder `200`
+con el archivo entero. La capacidad se anuncia como
+`strict_etag_preconditions` en `/api/v1/health`.
+
 ### Lectura vectorizada con multi-range
 
 EMUS v1 también acepta el mecanismo HTTP estándar de rangos múltiples:
@@ -404,6 +412,13 @@ Normal response:
 Content-Range: bytes 1048576-1572863/TOTAL
 Content-Length: 524288
 ~~~
+
+For an emulation session that requires the remote image to remain unchanged,
+the client can send `If-Match: "<etag>"` together with `Range`. A stale ETag
+returns `412 Precondition Failed` without falling back to a complete file
+transfer. This avoids the standard `If-Range` fallback where a stale validator
+may produce a full `200` response. Clients can negotiate this behavior through
+the `strict_etag_preconditions` health capability.
 
 Clients must allow short reads at EOF and treat an ETag change as file
 invalidation.

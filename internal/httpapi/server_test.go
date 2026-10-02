@@ -173,6 +173,48 @@ func TestTransportMetricsClassifiesStaleIfRangeFallbackAsFullGet(t *testing.T) {
 	}
 }
 
+func TestIfMatchRejectsStaleRangeWithoutFullFileFallback(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	req.Header.Set("Range", "bytes=2-5")
+	req.Header.Set("If-Match", "\"stale-etag\"")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale If-Match status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("stale If-Match unexpectedly returned file bytes: %q", rec.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	for _, want := range []string{
+		`"file_get_requests":1`,
+		`"range_requests":1`,
+		`"partial_content_responses":0`,
+		`"full_get_requests":0`,
+		`"bytes_served":0`,
+		`"range_bytes_served":0`,
+		`"full_get_bytes_served":0`,
+		`"errors":1`,
+	} {
+		if !strings.Contains(metricsRec.Body.String(), want) {
+			t.Fatalf("If-Match metrics missing %s: %s", want, metricsRec.Body.String())
+		}
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(healthRec, healthReq)
+	if !strings.Contains(healthRec.Body.String(), `"strict_etag_preconditions":true`) {
+		t.Fatalf("health did not advertise strict ETag preconditions: %s", healthRec.Body.String())
+	}
+}
+
 func TestTransportMetricsResetRequiresTokenAndClearsCounters(t *testing.T) {
 	unsecured, unsecuredEntry := testServer(t, "")
 	rangeReq := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+unsecuredEntry.ID, nil)

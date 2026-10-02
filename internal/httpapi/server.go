@@ -151,6 +151,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"anchored_virtual_sidecars": true,
 			"catalog_discovery":         true,
 			"catalog_etag":              true,
+			"strict_etag_preconditions": true,
 			"catalog_rebuild":           s.token != "",
 			"library_editing":           s.token != "" && s.configPath != "",
 			"transport_metrics":          true,
