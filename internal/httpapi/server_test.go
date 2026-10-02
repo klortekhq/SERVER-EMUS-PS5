@@ -558,6 +558,28 @@ func TestBearerToken(t *testing.T) {
 }
 
 
+func TestAnchoredSidecarRejectsDuplicateVirtualPath(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/files/"+entry.ID+"?path=first.bin&path=second.bin",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(
+		rec.Body.String(),
+		`"error":"virtual sidecar path must appear exactly once"`,
+	) {
+		t.Fatalf("duplicate path response mismatch: %s", rec.Body.String())
+	}
+}
+
 func TestAnchoredSidecarRejectsOversizedVirtualPath(t *testing.T) {
 	server, entry := testServer(t, "")
 

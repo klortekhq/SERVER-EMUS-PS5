@@ -19,7 +19,7 @@ ps5rt lo traduce internamente a:
 http://192.168.1.50:8787/api/v1/files/<file-id>
 ~~~
 
-El ID procede del catálogo y no contiene la ruta física del servidor. El sufijo es una **ruta virtual relativa** anclada al directorio de ese ID. `ps5rt` la codifica al transportar la petición y el servidor la resuelve únicamente dentro de la misma biblioteca configurada. Esto permite que CUE/CCD/TOC/M3U abran BIN/IMG/SUB/discos relativos sin SMB ni rutas físicas del NAS.
+El ID procede del catálogo y no contiene la ruta física del servidor. El sufijo es una **ruta virtual relativa** anclada al directorio de ese ID. Cuando se usa `?path=`, el parámetro debe aparecer exactamente una vez y su valor decodificado está limitado a 4096 bytes. `ps5rt` la codifica al transportar la petición y el servidor la resuelve únicamente dentro de la misma biblioteca configurada. Esto permite que CUE/CCD/TOC/M3U abran BIN/IMG/SUB/discos relativos sin SMB ni rutas físicas del NAS.
 
 ### Descubrimiento
 

@@ -438,7 +438,19 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	virtualPath := r.URL.Query().Get("path")
+	query := r.URL.Query()
+	pathValues, hasVirtualPath := query["path"]
+	if hasVirtualPath && len(pathValues) != 1 {
+		writeJSON(mw, http.StatusBadRequest, map[string]string{
+			"error": "virtual sidecar path must appear exactly once",
+		})
+		return
+	}
+
+	virtualPath := ""
+	if hasVirtualPath {
+		virtualPath = pathValues[0]
+	}
 	if len(virtualPath) > maxVirtualPathBytes {
 		writeJSON(mw, http.StatusBadRequest, map[string]any{
 			"error":                  "virtual sidecar path too long",
