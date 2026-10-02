@@ -52,6 +52,39 @@ func TestRangeRead(t *testing.T) {
 	}
 }
 
+func TestRangeHeaderHasApplicationSizeLimit(t *testing.T) {
+	server, entry := testServer(t, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+entry.ID, nil)
+	req.Header.Set("Range", "bytes="+strings.Repeat("0-", maxRangeHeaderBytes))
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"max_range_header_bytes":8192`) {
+		t.Fatalf("limit missing from response: %s", rec.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
+	metricsRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsRec, metricsReq)
+	if !strings.Contains(metricsRec.Body.String(), `"range_header_rejections":1`) {
+		t.Fatalf("range-header rejection not counted: %s", metricsRec.Body.String())
+	}
+	if !strings.Contains(metricsRec.Body.String(), `"range_requests":0`) {
+		t.Fatalf("oversized header should be rejected before Range accounting: %s", metricsRec.Body.String())
+	}
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(healthRec, healthReq)
+	if !strings.Contains(healthRec.Body.String(), `"max_range_header_bytes":8192`) {
+		t.Fatalf("health did not advertise Range header limit: %s", healthRec.Body.String())
+	}
+}
+
 func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 	server, entry := testServer(t, "")
 

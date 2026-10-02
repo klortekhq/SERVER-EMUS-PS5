@@ -222,7 +222,7 @@ Cuando ambos rangos son válidos, la respuesta es `206 Partial Content` con
 lecturas discontiguas/prefetch en un solo round-trip sin introducir un segundo
 protocolo binario propietario.
 
-El servidor limita cada petición a **16 rangos** para acotar memoria/overhead.
+El servidor limita cada petición a **16 rangos** y el campo `Range` a **8192 bytes** para acotar memoria/CPU de parsing. Un campo `Range` que exceda ese límite recibe `431 Request Header Fields Too Large` antes de procesar rangos.
 La capacidad se anuncia como `multi_ranges: true` y el límite actual como
 `max_range_parts: 16`. Un cliente debe seguir aceptando el camino normal de
 un solo Range y no asumir que multi-range existe sin negociar `/health`.
@@ -245,6 +245,7 @@ Devuelve contadores acumulados desde el arranque. `range_requests` cuenta intent
 - `range_requests` (intentos Range del cliente);
 - `partial_content_responses` (respuestas 206 realmente emitidas);
 - `multi_range_requests`;
+- `range_header_rejections`;
 - `full_get_requests`;
 - `sidecar_requests`;
 - `bytes_served`;
@@ -413,9 +414,11 @@ invalidation.
 GET /api/v1/metrics
 ~~~
 
+The file endpoint limits a request to 16 byte ranges and limits the `Range` header field to 8192 bytes; larger values receive `431 Request Header Fields Too Large` before range parsing.
+
 The endpoint exposes cumulative counters since process start: uptime, file
 GET/HEAD requests, Range attempts, actual 206 Partial Content responses, successful full 200 GET responses, sidecar requests, total bytes,
-Range/full-GET bytes, cumulative/max file-request latency in microseconds, 404s
+Range/full-GET bytes, Range-header rejections, cumulative/max file-request latency in microseconds, 404s
 and errors. A Range request with a stale `If-Range` validator may increment both the Range-attempt counter and the full-GET counter because the emitted response is a complete `200 OK`. It contains no game IDs, names or physical paths.
 
 Average file-request latency for a sample is

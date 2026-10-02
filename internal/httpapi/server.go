@@ -16,7 +16,10 @@ import (
 	"github.com/klortekhq/server-emus-ps5/internal/config"
 )
 
-const maxRangeParts = 16
+const (
+	maxRangeParts       = 16
+	maxRangeHeaderBytes = 8 << 10
+)
 
 type transportMetrics struct {
 	fileGetRequests        atomic.Uint64
@@ -24,6 +27,7 @@ type transportMetrics struct {
 	rangeRequests          atomic.Uint64
 	partialContentResponses atomic.Uint64
 	multiRangeRequests     atomic.Uint64
+	rangeHeaderRejections  atomic.Uint64
 	fullGetRequests        atomic.Uint64
 	sidecarRequests        atomic.Uint64
 	bytesServed            atomic.Uint64
@@ -41,6 +45,7 @@ func (m *transportMetrics) reset() {
 	m.rangeRequests.Store(0)
 	m.partialContentResponses.Store(0)
 	m.multiRangeRequests.Store(0)
+	m.rangeHeaderRejections.Store(0)
 	m.fullGetRequests.Store(0)
 	m.sidecarRequests.Store(0)
 	m.bytesServed.Store(0)
@@ -142,6 +147,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 			"byte_ranges":               true,
 			"multi_ranges":              true,
 			"max_range_parts":           maxRangeParts,
+			"max_range_header_bytes":    maxRangeHeaderBytes,
 			"anchored_virtual_sidecars": true,
 			"catalog_discovery":         true,
 			"catalog_etag":              true,
@@ -171,7 +177,8 @@ func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
 		"range_requests":            s.metrics.rangeRequests.Load(),
 		"partial_content_responses": s.metrics.partialContentResponses.Load(),
 		"multi_range_requests":      s.metrics.multiRangeRequests.Load(),
-		"full_get_requests":    s.metrics.fullGetRequests.Load(),
+		"range_header_rejections":   s.metrics.rangeHeaderRejections.Load(),
+		"full_get_requests":         s.metrics.fullGetRequests.Load(),
 		"sidecar_requests":              s.metrics.sidecarRequests.Load(),
 		"bytes_served":                  s.metrics.bytesServed.Load(),
 		"range_bytes_served":            s.metrics.rangeBytesServed.Load(),
@@ -381,6 +388,19 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		s.metrics.fileGetRequests.Add(1)
 		if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
+			// Bound application-level Range parsing before counting commas or
+			// handing the field to ServeContent. net/http has a broader total
+			// header limit; this narrower cap keeps adversarial Range values
+			// from consuming unnecessary CPU/memory in this endpoint.
+			if len(rangeHeader) > maxRangeHeaderBytes {
+				s.metrics.rangeHeaderRejections.Add(1)
+				writeJSON(mw, http.StatusRequestHeaderFieldsTooLarge, map[string]any{
+					"error":                  "Range header too large",
+					"max_range_header_bytes": maxRangeHeaderBytes,
+				})
+				return
+			}
+
 			// Range requests count client attempts. full_get_requests counts
 			// successful complete 200 responses after ServeContent resolves
 			// validators such as If-Range.
