@@ -242,7 +242,8 @@ Devuelve contadores acumulados desde el arranque. `range_requests` cuenta intent
 - `uptime_seconds`;
 - `file_get_requests`;
 - `file_head_requests`;
-- `range_requests`;
+- `range_requests` (intentos Range del cliente);
+- `partial_content_responses` (respuestas 206 realmente emitidas);
 - `multi_range_requests`;
 - `full_get_requests`;
 - `sidecar_requests`;
@@ -413,7 +414,7 @@ GET /api/v1/metrics
 ~~~
 
 The endpoint exposes cumulative counters since process start: uptime, file
-GET/HEAD requests, Range attempts, successful full 200 GET responses, sidecar requests, total bytes,
+GET/HEAD requests, Range attempts, actual 206 Partial Content responses, successful full 200 GET responses, sidecar requests, total bytes,
 Range/full-GET bytes, cumulative/max file-request latency in microseconds, 404s
 and errors. A Range request with a stale `If-Range` validator may increment both the Range-attempt counter and the full-GET counter because the emitted response is a complete `200 OK`. It contains no game IDs, names or physical paths.
 

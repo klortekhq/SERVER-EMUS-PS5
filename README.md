@@ -160,7 +160,7 @@ revisión no contiene rutas físicas del NAS y un rescan sin cambios conserva el
 mismo ETag.
 
 `GET /api/v1/metrics` expone únicamente telemetría de transporte sin rutas:
-uptime, GET/HEAD de archivos, peticiones Range, GET completos, sidecars, bytes
+uptime, GET/HEAD de archivos, intentos Range, respuestas 206 reales, GET completos, sidecars, bytes
 servidos totales y separados por Range/GET completo, latencia acumulada y
 máxima de requests de archivo, 404 y errores. Está pensado para medir patrones reales de emulación y
 comparar read-ahead/cache/EMUS frente a SMB antes de afirmar mejoras de
@@ -316,6 +316,10 @@ Portable-build run **36839534917** produces six standalone artifacts:
 - Windows arm64
 - macOS amd64
 - macOS arm64
+
+Transport metrics now distinguish Range attempts from actual 206 responses, so
+stale `If-Range` fallbacks can be measured without overstating random-read
+success.
 
 The read-only, path-free library metadata API is implemented. An authenticated
 `POST /api/v1/catalog/rebuild` can rescan configured libraries without

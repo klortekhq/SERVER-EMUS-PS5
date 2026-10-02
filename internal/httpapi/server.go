@@ -22,6 +22,7 @@ type transportMetrics struct {
 	fileGetRequests        atomic.Uint64
 	fileHeadRequests       atomic.Uint64
 	rangeRequests          atomic.Uint64
+	partialContentResponses atomic.Uint64
 	multiRangeRequests     atomic.Uint64
 	fullGetRequests        atomic.Uint64
 	sidecarRequests        atomic.Uint64
@@ -38,6 +39,7 @@ func (m *transportMetrics) reset() {
 	m.fileGetRequests.Store(0)
 	m.fileHeadRequests.Store(0)
 	m.rangeRequests.Store(0)
+	m.partialContentResponses.Store(0)
 	m.multiRangeRequests.Store(0)
 	m.fullGetRequests.Store(0)
 	m.sidecarRequests.Store(0)
@@ -166,8 +168,9 @@ func (s *Server) transportMetrics(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":     uint64(uptime / time.Second),
 		"file_get_requests":  s.metrics.fileGetRequests.Load(),
 		"file_head_requests": s.metrics.fileHeadRequests.Load(),
-		"range_requests":       s.metrics.rangeRequests.Load(),
-		"multi_range_requests": s.metrics.multiRangeRequests.Load(),
+		"range_requests":            s.metrics.rangeRequests.Load(),
+		"partial_content_responses": s.metrics.partialContentResponses.Load(),
+		"multi_range_requests":      s.metrics.multiRangeRequests.Load(),
 		"full_get_requests":    s.metrics.fullGetRequests.Load(),
 		"sidecar_requests":              s.metrics.sidecarRequests.Load(),
 		"bytes_served":                  s.metrics.bytesServed.Load(),
@@ -351,6 +354,7 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 			// deliberately turns a Range attempt into a complete 200 response.
 			switch mw.status {
 			case http.StatusPartialContent:
+				s.metrics.partialContentResponses.Add(1)
 				s.metrics.rangeBytesServed.Add(mw.bytes)
 			case http.StatusOK:
 				s.metrics.fullGetRequests.Add(1)

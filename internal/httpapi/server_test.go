@@ -81,6 +81,7 @@ func TestTransportMetricsCountRangeTraffic(t *testing.T) {
 		`"file_get_requests":1`,
 		`"file_head_requests":1`,
 		`"range_requests":1`,
+		`"partial_content_responses":1`,
 		`"multi_range_requests":0`,
 		`"full_get_requests":0`,
 		`"bytes_served":4`,
@@ -126,6 +127,7 @@ func TestTransportMetricsClassifiesStaleIfRangeFallbackAsFullGet(t *testing.T) {
 	for _, want := range []string{
 		`"file_get_requests":1`,
 		`"range_requests":1`,
+		`"partial_content_responses":0`,
 		`"multi_range_requests":0`,
 		`"full_get_requests":1`,
 		`"bytes_served":10`,
