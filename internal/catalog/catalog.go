@@ -577,23 +577,19 @@ func (c *Catalog) OpenVirtual(anchorID, virtualPath string) (*os.File, Entry, er
 		return nil, Entry{}, os.ErrNotExist
 	}
 
-	f, err := os.Open(entry.HostPath)
+	f, info, openedPath, err := openRegularWithinRoot(
+		entry.LibraryRoot,
+		entry.HostPath,
+	)
 	if err != nil {
 		return nil, Entry{}, err
-	}
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, Entry{}, err
-	}
-	if !info.Mode().IsRegular() {
-		f.Close()
-		return nil, Entry{}, fmt.Errorf("catalog entry is no longer a regular file")
 	}
 
 	// Refresh response metadata from the opened file descriptor. A file may
 	// change between periodic catalog rescans; stale ETags would make If-Range
-	// semantics unsafe for a running emulator.
+	// semantics unsafe for a running emulator. HostPath also follows the object
+	// actually opened so callers never retain a stale pre-open resolution.
+	entry.HostPath = openedPath
 	entry.Size = info.Size()
 	entry.ModifiedAt = info.ModTime().UTC()
 	entry.ETag = metadataETag(info.Size(), info.ModTime())
