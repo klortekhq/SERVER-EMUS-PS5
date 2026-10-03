@@ -40,6 +40,10 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if r.Header.Get("Authorization") != "Bearer fixture-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Accept-Ranges", "bytes")
 		if r.Method == http.MethodHead {
@@ -55,7 +59,8 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	}))
 	defer server.Close()
 
-	size, gotETag, err := ProbeHTTP(context.Background(), server.Client(), server.URL, "fixture")
+	options := HTTPOptions{BearerToken: "fixture-secret"}
+	size, gotETag, err := ProbeHTTP(context.Background(), server.Client(), server.URL, "fixture", options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +71,25 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stats, err := MeasureHTTP(context.Background(), server.Client(), server.URL, "fixture", gotETag, plan)
+	stats, err := MeasureHTTP(context.Background(), server.Client(), server.URL, "fixture", gotETag, plan, options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stats.Requests != len(plan) || stats.Bytes != int64(len(plan))*4096 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestHTTPOptionsRejectLineBreak(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "http://example.test/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyHTTPOptions(req, HTTPOptions{BearerToken: "bad\nvalue"}); err == nil {
+		t.Fatal("accepted bearer token containing line break")
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("authorization header set after rejected token: %q", got)
 	}
 }
 
