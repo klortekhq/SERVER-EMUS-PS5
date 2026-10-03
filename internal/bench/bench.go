@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -106,11 +107,18 @@ func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag
 	latencies := make([]time.Duration, 0, len(plan))
 	start := time.Now()
 	for _, item := range plan {
+		if item.Offset < 0 || item.Length <= 0 {
+			return Stats{}, errors.New("plan contains an invalid HTTP range")
+		}
+		end := item.Offset + item.Length - 1
+		if end < item.Offset {
+			return Stats{}, errors.New("plan HTTP range overflows int64")
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return Stats{}, err
 		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, item.Offset+item.Length-1))
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, end))
 		req.Header.Set("If-Match", etag)
 		if err := applyHTTPOptions(req, options); err != nil {
 			return Stats{}, err
@@ -131,6 +139,16 @@ func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag
 		}
 		if resp.StatusCode != http.StatusPartialContent {
 			return Stats{}, fmt.Errorf("range GET returned %s", resp.Status)
+		}
+		if got := strings.TrimSpace(resp.Header.Get("ETag")); got != etag {
+			return Stats{}, fmt.Errorf(
+				"range GET ETag changed: got %q, expected %q",
+				got,
+				etag,
+			)
+		}
+		if err := validateContentRange(resp.Header.Get("Content-Range"), item); err != nil {
+			return Stats{}, err
 		}
 		if int64(len(body)) != item.Length {
 			return Stats{}, fmt.Errorf("range GET returned %d bytes, expected %d", len(body), item.Length)
@@ -176,6 +194,49 @@ func MeasureFile(path string, plan []Range) (Stats, error) {
 		total += int64(n)
 	}
 	return summarize("mounted-file", total, time.Since(start), latencies), nil
+}
+
+func validateContentRange(value string, item Range) error {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "bytes ") {
+		return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+	}
+	parts := strings.SplitN(strings.TrimPrefix(value, "bytes "), "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+	}
+	bounds := strings.SplitN(parts[0], "-", 2)
+	if len(bounds) != 2 {
+		return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+	}
+	start, err := strconv.ParseInt(bounds[0], 10, 64)
+	if err != nil {
+		return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+	}
+	end, err := strconv.ParseInt(bounds[1], 10, 64)
+	if err != nil {
+		return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+	}
+	expectedEnd := item.Offset + item.Length - 1
+	if item.Offset < 0 || item.Length <= 0 || expectedEnd < item.Offset {
+		return errors.New("plan contains an invalid HTTP range")
+	}
+	if start != item.Offset || end != expectedEnd {
+		return fmt.Errorf(
+			"range GET returned Content-Range %d-%d, expected %d-%d",
+			start,
+			end,
+			item.Offset,
+			expectedEnd,
+		)
+	}
+	if parts[1] != "*" {
+		total, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || total <= end {
+			return fmt.Errorf("range GET returned invalid Content-Range %q", value)
+		}
+	}
+	return nil
 }
 
 func applyHTTPOptions(req *http.Request, options HTTPOptions) error {

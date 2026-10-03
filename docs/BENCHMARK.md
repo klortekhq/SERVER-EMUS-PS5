@@ -54,9 +54,11 @@ Reported fields include:
 - maximum latency.
 
 The HTTP side probes the file with `HEAD`, requires `Accept-Ranges: bytes`
-and an ETag, then sends each read with both `Range` and `If-Match`. That
-prevents a benchmark from silently continuing against a file that changed
-during the sample.
+and an ETag, then sends each read with both `Range` and `If-Match`. Every 206
+response must return the same ETag and a `Content-Range` matching the exact
+offset/length requested; malformed, shifted or truncated range metadata aborts
+the run. That prevents a benchmark from silently timing the wrong bytes or
+continuing against a file that changed during the sample.
 
 The same seed, file size, read size and sample count produce the same offset
 plan. Keep those values fixed when comparing EMUS against an OS-mounted SMB
