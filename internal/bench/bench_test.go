@@ -229,6 +229,10 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		if r.Header.Get("Accept-Encoding") != "identity" {
+			http.Error(w, "identity encoding required", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Accept-Ranges", "bytes")
 		if r.Method == http.MethodHead {
@@ -262,6 +266,51 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	}
 	if stats.Reads != len(plan) || stats.Requests != len(plan) || stats.Bytes != int64(len(plan))*4096 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestHTTPRangeMeasurementRejectsTransformedResponse(t *testing.T) {
+	data := bytes.Repeat([]byte{0x5a}, 4096)
+	etag := `"fixture-v1"`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Accept-Ranges", "bytes")
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Range", "bytes 0-63/4096")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(data[:64])
+	}))
+	defer server.Close()
+
+	size, gotETag, err := ProbeHTTP(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fixture",
+		HTTPOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != int64(len(data)) {
+		t.Fatalf("unexpected probe size: %d", size)
+	}
+	_, err = MeasureHTTP(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fixture",
+		gotETag,
+		[]Range{{Offset: 0, Length: 64}},
+		HTTPOptions{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Content-Encoding") {
+		t.Fatalf("transformed range response was not rejected: %v", err)
 	}
 }
 

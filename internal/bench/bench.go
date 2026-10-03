@@ -250,6 +250,7 @@ func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string,
 	if err != nil {
 		return 0, "", err
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	if err := applyHTTPOptions(req, options); err != nil {
 		return 0, "", err
 	}
@@ -260,6 +261,9 @@ func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string,
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return 0, "", fmt.Errorf("HEAD returned %s", resp.Status)
+	}
+	if err := validateIdentityEncoding(resp.Header); err != nil {
+		return 0, "", fmt.Errorf("HEAD: %w", err)
 	}
 	if resp.ContentLength <= 0 {
 		return 0, "", errors.New("HEAD returned invalid Content-Length")
@@ -319,6 +323,7 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 		}
 		req.Header.Set("Range", "bytes="+strings.Join(rangeValues, ","))
 		req.Header.Set("If-Match", etag)
+		req.Header.Set("Accept-Encoding", "identity")
 		if err := applyHTTPOptions(req, options); err != nil {
 			return Stats{}, err
 		}
@@ -339,6 +344,10 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 				got,
 				etag,
 			)
+		}
+		if err := validateIdentityEncoding(resp.Header); err != nil {
+			_ = resp.Body.Close()
+			return Stats{}, fmt.Errorf("range GET: %w", err)
 		}
 
 		if len(batch) == 1 {
@@ -381,6 +390,11 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 					return Stats{}, fmt.Errorf("multi-range part %d: %w", i, err)
 				}
 				if err := validateContentRange(part.Header.Get("Content-Range"), item); err != nil {
+					_ = part.Close()
+					_ = resp.Body.Close()
+					return Stats{}, fmt.Errorf("multi-range part %d: %w", i, err)
+				}
+				if err := validateIdentityEncoding(part.Header); err != nil {
 					_ = part.Close()
 					_ = resp.Body.Close()
 					return Stats{}, fmt.Errorf("multi-range part %d: %w", i, err)
@@ -561,6 +575,7 @@ func VerifyBaselineSamples(
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, rangeEnd))
 		req.Header.Set("If-Match", etag)
+		req.Header.Set("Accept-Encoding", "identity")
 		if err := applyHTTPOptions(req, options); err != nil {
 			return err
 		}
@@ -576,6 +591,10 @@ func VerifyBaselineSamples(
 		if got := strings.TrimSpace(resp.Header.Get("ETag")); got != etag {
 			_ = resp.Body.Close()
 			return fmt.Errorf("baseline verification ETag changed: got %q, expected %q", got, etag)
+		}
+		if err := validateIdentityEncoding(resp.Header); err != nil {
+			_ = resp.Body.Close()
+			return fmt.Errorf("baseline verification: %w", err)
 		}
 		if err := validateContentRange(resp.Header.Get("Content-Range"), item); err != nil {
 			_ = resp.Body.Close()
@@ -599,6 +618,14 @@ func VerifyBaselineSamples(
 	}
 
 	return nil
+}
+
+func validateIdentityEncoding(header http.Header) error {
+	value := strings.TrimSpace(header.Get("Content-Encoding"))
+	if value == "" || strings.EqualFold(value, "identity") {
+		return nil
+	}
+	return fmt.Errorf("unexpected Content-Encoding %q; exact byte benchmarks require identity encoding", value)
 }
 
 func validateContentRange(value string, item Range) error {
