@@ -16,6 +16,7 @@ func main() {
 	serverURL := flag.String("server", "", "SERVER-EMUS base URL")
 	fileID := flag.String("file-id", "", "catalog file id")
 	localPath := flag.String("local", "", "optional mounted-file baseline")
+	tokenEnv := flag.String("token-env", "SERVER_EMUS_TOKEN", "environment variable containing bearer token; empty disables auth")
 	readSize := flag.Int64("read-size", 64*1024, "bytes per random read")
 	samples := flag.Int("samples", 256, "number of random reads")
 	seed := flag.Uint64("seed", 1, "deterministic plan seed")
@@ -31,6 +32,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
+	options := bench.HTTPOptions{}
+	if *tokenEnv != "" {
+		options.BearerToken = os.Getenv(*tokenEnv)
+	}
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConns:        8,
@@ -39,7 +45,7 @@ func main() {
 		},
 	}
 
-	size, etag, err := bench.ProbeHTTP(ctx, client, *serverURL, *fileID)
+	size, etag, err := bench.ProbeHTTP(ctx, client, *serverURL, *fileID, options)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "probe:", err)
 		os.Exit(1)
@@ -51,7 +57,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpStats, err := bench.MeasureHTTP(ctx, client, *serverURL, *fileID, etag, plan)
+	httpStats, err := bench.MeasureHTTP(ctx, client, *serverURL, *fileID, etag, plan, options)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "HTTP benchmark:", err)
 		os.Exit(1)
