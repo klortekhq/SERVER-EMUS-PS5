@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"sort"
@@ -140,7 +141,9 @@ type Stats struct {
 	MiBPerSecond float64 `json:"mib_per_second"`
 	P50MS        float64 `json:"p50_ms"`
 	P95MS        float64 `json:"p95_ms"`
-	MaxMS        float64 `json:"max_ms"`
+	MaxMS             float64 `json:"max_ms"`
+	FreshConnections  int     `json:"fresh_connections,omitempty"`
+	ReusedConnections int     `json:"reused_connections,omitempty"`
 }
 
 type HTTPOptions struct {
@@ -295,6 +298,8 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 	}
 
 	var total int64
+	var freshConnections int
+	var reusedConnections int
 	latencies := make([]time.Duration, 0, (len(plan)+batchSize-1)/batchSize)
 	started := time.Now()
 
@@ -317,7 +322,17 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 			rangeValues[i] = fmt.Sprintf("%d-%d", item.Offset, rangeEnd)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		trace := &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) {
+				if info.Reused {
+					reusedConnections++
+				} else {
+					freshConnections++
+				}
+			},
+		}
+		requestContext := httptrace.WithClientTrace(ctx, trace)
+		req, err := http.NewRequestWithContext(requestContext, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return Stats{}, err
 		}
@@ -438,13 +453,16 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 		latencies = append(latencies, time.Since(requestStart))
 	}
 
-	return summarize(
+	stats := summarize(
 		"emus-http-range",
 		total,
 		time.Since(started),
 		latencies,
 		len(plan),
-	), nil
+	)
+	stats.FreshConnections = freshConnections
+	stats.ReusedConnections = reusedConnections
+	return stats, nil
 }
 
 func MeasureFile(path string, plan []Range) (Stats, error) {

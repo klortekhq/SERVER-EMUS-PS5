@@ -267,6 +267,12 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	if stats.Reads != len(plan) || stats.Requests != len(plan) || stats.Bytes != int64(len(plan))*4096 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
+	if stats.FreshConnections+stats.ReusedConnections != stats.Requests {
+		t.Fatalf("connection accounting does not match requests: %+v", stats)
+	}
+	if stats.FreshConnections < 1 {
+		t.Fatalf("benchmark did not observe an initial connection: %+v", stats)
+	}
 }
 
 func TestHTTPRangeMeasurementRejectsTransformedResponse(t *testing.T) {
@@ -366,6 +372,9 @@ func TestHTTPBatchedRangeMeasurement(t *testing.T) {
 	}
 	if stats.Reads != 10 || stats.Requests != 3 || stats.Bytes != 10*1024 {
 		t.Fatalf("unexpected batched stats: %+v", stats)
+	}
+	if stats.FreshConnections+stats.ReusedConnections != stats.Requests {
+		t.Fatalf("batched connection accounting mismatch: %+v", stats)
 	}
 }
 

@@ -60,7 +60,9 @@ Reported fields include:
 - MiB/s;
 - p50 latency;
 - p95 latency;
-- maximum latency.
+- maximum latency;
+- fresh TCP connections observed by the HTTP transport;
+- reused persistent connections observed by the HTTP transport.
 
 The HTTP side probes the file with `HEAD`, requires `Accept-Ranges: bytes`
 and an ETag, then sends each read with both `Range` and `If-Match`. Probe,
@@ -133,3 +135,16 @@ Record at least:
 - raw JSON output.
 
 Physical PS5 measurements remain a separate validation gate.
+
+
+## Connection reuse evidence
+
+The HTTP result records `fresh_connections` and `reused_connections` using
+Go's client transport trace. This makes the persistent-connection assumption
+measurable instead of implicit: a benchmark that unexpectedly reconnects for
+every Range request is visible in the JSON result and should not be compared as
+if it were using the intended steady-state transport.
+
+These counters describe the benchmark client's HTTP connection behavior only.
+They do not prove lower latency than SMB and do not replace physical-PS5
+transport measurements.
