@@ -76,6 +76,18 @@ baseline file size to match the server object's probed size exactly; a
 different-size file is rejected before timing so a superficially valid read
 plan cannot benchmark a different object by accident.
 
+After both timed measurements, `-local` also performs distributed byte
+comparisons across the deterministic plan (8 samples by default). This catches
+a same-size but different mounted object without warming either side before
+the timed pass. Use `-verify-baseline-samples N` to change the count or
+`-verify-baseline-samples 0` to disable it.
+
+This remains a bounded sampled identity check, not a cryptographic proof that
+every byte of a multi-gigabyte image is identical. The server ETag binds the
+HTTP side to the object probed at the start of the run; the sampled comparison
+is an additional guard against accidentally benchmarking a different same-size
+mounted file.
+
 Three deterministic access patterns are available:
 
 - `random` — independent offsets; preserves the original benchmark behavior;
