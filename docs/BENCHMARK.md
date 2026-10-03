@@ -23,9 +23,25 @@ go run ./cmd/bench \
   -json
 ```
 
-The current first gate is intended for a trusted benchmark instance without a
-bearer token. Authentication support can be added without changing the read
-plan or result schema.
+Bearer-authenticated servers are supported without putting the token in
+process arguments or benchmark output. By default the client reads the token
+from the `SERVER_EMUS_TOKEN` environment variable. Use `-token-env NAME` to
+select another environment variable, or `-token-env ""` for a trusted
+unauthenticated benchmark instance.
+
+Example:
+
+```bash
+export SERVER_EMUS_TOKEN='<server bearer token>'
+go run ./cmd/bench \
+  -server http://192.168.1.50:8787 \
+  -file-id <catalog-file-id> \
+  -samples 512 \
+  -json
+```
+
+Do not place the bearer token directly on the command line: shell history and
+process listings can expose command-line arguments.
 
 Reported fields include:
 
