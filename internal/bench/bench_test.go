@@ -128,8 +128,82 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Requests != len(plan) || stats.Bytes != int64(len(plan))*4096 {
+	if stats.Reads != len(plan) || stats.Requests != len(plan) || stats.Bytes != int64(len(plan))*4096 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+}
+
+func TestHTTPBatchedRangeMeasurement(t *testing.T) {
+	data := bytes.Repeat([]byte("0123456789abcdef"), 4096)
+	etag := `"fixture-v1"`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/files/fixture" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Accept-Ranges", "bytes")
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Header.Get("If-Match") != etag {
+			http.Error(w, "precondition failed", http.StatusPreconditionFailed)
+			return
+		}
+		http.ServeContent(w, r, "fixture.bin", time.Unix(1, 0), bytes.NewReader(data))
+	}))
+	defer server.Close()
+
+	size, gotETag, err := ProbeHTTP(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fixture",
+		HTTPOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanPattern(size, 1024, 10, 5, PatternClustered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := MeasureHTTPBatched(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"fixture",
+		gotETag,
+		plan,
+		4,
+		HTTPOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Reads != 10 || stats.Requests != 3 || stats.Bytes != 10*1024 {
+		t.Fatalf("unexpected batched stats: %+v", stats)
+	}
+}
+
+func TestHTTPBatchedRejectsInvalidBatchSize(t *testing.T) {
+	plan := []Range{{Offset: 0, Length: 16}}
+	client := &http.Client{}
+	for _, batch := range []int{0, 17} {
+		if _, err := MeasureHTTPBatched(
+			context.Background(),
+			client,
+			"http://127.0.0.1",
+			"fixture",
+			`"etag"`,
+			plan,
+			batch,
+			HTTPOptions{},
+		); err == nil {
+			t.Fatalf("accepted invalid batch size %d", batch)
+		}
 	}
 }
 
@@ -160,7 +234,7 @@ func TestMeasureFileUsesSamePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Requests != 8 || stats.Bytes != 8*8192 {
+	if stats.Reads != 8 || stats.Requests != 8 || stats.Bytes != 8*8192 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 }

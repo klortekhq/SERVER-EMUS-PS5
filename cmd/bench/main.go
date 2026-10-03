@@ -21,6 +21,7 @@ func main() {
 	samples := flag.Int("samples", 256, "number of random reads")
 	seed := flag.Uint64("seed", 1, "deterministic plan seed")
 	pattern := flag.String("pattern", "random", "read pattern: random, sequential or clustered")
+	batch := flag.Int("batch", 1, "HTTP ranges per request (1-16)")
 	timeout := flag.Duration("timeout", 2*time.Minute, "whole benchmark timeout")
 	jsonOut := flag.Bool("json", false, "emit JSON")
 	flag.Parse()
@@ -64,7 +65,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpStats, err := bench.MeasureHTTP(ctx, client, *serverURL, *fileID, etag, plan, options)
+	httpStats, err := bench.MeasureHTTPBatched(
+		ctx,
+		client,
+		*serverURL,
+		*fileID,
+		etag,
+		plan,
+		*batch,
+		options,
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "HTTP benchmark:", err)
 		os.Exit(1)
@@ -92,8 +102,9 @@ func main() {
 
 	for _, result := range results {
 		fmt.Printf(
-			"%s requests=%d bytes=%d elapsed=%.2fms MiB/s=%.2f p50=%.3fms p95=%.3fms max=%.3fms\n",
+			"%s reads=%d requests=%d bytes=%d elapsed=%.2fms MiB/s=%.2f p50=%.3fms p95=%.3fms max=%.3fms\n",
 			result.Source,
+			result.Reads,
 			result.Requests,
 			result.Bytes,
 			result.ElapsedMS,

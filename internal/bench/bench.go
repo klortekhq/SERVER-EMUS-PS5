@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +24,7 @@ type Range struct {
 
 type Stats struct {
 	Source       string  `json:"source"`
+	Reads        int     `json:"reads"`
 	Requests     int     `json:"requests"`
 	Bytes        int64   `json:"bytes"`
 	ElapsedMS    float64 `json:"elapsed_ms"`
@@ -163,6 +166,10 @@ func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string,
 }
 
 func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag string, plan []Range, options HTTPOptions) (Stats, error) {
+	return MeasureHTTPBatched(ctx, client, baseURL, fileID, etag, plan, 1, options)
+}
+
+func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileID, etag string, plan []Range, batchSize int, options HTTPOptions) (Stats, error) {
 	endpoint, err := fileURL(baseURL, fileID)
 	if err != nil {
 		return Stats{}, err
@@ -170,59 +177,151 @@ func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag
 	if len(plan) == 0 {
 		return Stats{}, errors.New("plan is empty")
 	}
+	if batchSize < 1 || batchSize > 16 {
+		return Stats{}, errors.New("batch size must be between 1 and 16")
+	}
+
 	var total int64
-	latencies := make([]time.Duration, 0, len(plan))
-	start := time.Now()
-	for _, item := range plan {
-		if item.Offset < 0 || item.Length <= 0 {
-			return Stats{}, errors.New("plan contains an invalid HTTP range")
+	latencies := make([]time.Duration, 0, (len(plan)+batchSize-1)/batchSize)
+	started := time.Now()
+
+	for begin := 0; begin < len(plan); begin += batchSize {
+		endIndex := begin + batchSize
+		if endIndex > len(plan) {
+			endIndex = len(plan)
 		}
-		end := item.Offset + item.Length - 1
-		if end < item.Offset {
-			return Stats{}, errors.New("plan HTTP range overflows int64")
+		batch := plan[begin:endIndex]
+
+		rangeValues := make([]string, len(batch))
+		for i, item := range batch {
+			if item.Offset < 0 || item.Length <= 0 {
+				return Stats{}, errors.New("plan contains an invalid HTTP range")
+			}
+			rangeEnd := item.Offset + item.Length - 1
+			if rangeEnd < item.Offset {
+				return Stats{}, errors.New("plan HTTP range overflows int64")
+			}
+			rangeValues[i] = fmt.Sprintf("%d-%d", item.Offset, rangeEnd)
 		}
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return Stats{}, err
 		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, end))
+		req.Header.Set("Range", "bytes="+strings.Join(rangeValues, ","))
 		req.Header.Set("If-Match", etag)
 		if err := applyHTTPOptions(req, options); err != nil {
 			return Stats{}, err
 		}
+
 		requestStart := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
 			return Stats{}, err
 		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, item.Length+1))
-		closeErr := resp.Body.Close()
-		latencies = append(latencies, time.Since(requestStart))
-		if readErr != nil {
-			return Stats{}, readErr
-		}
-		if closeErr != nil {
-			return Stats{}, closeErr
-		}
 		if resp.StatusCode != http.StatusPartialContent {
+			_ = resp.Body.Close()
 			return Stats{}, fmt.Errorf("range GET returned %s", resp.Status)
 		}
 		if got := strings.TrimSpace(resp.Header.Get("ETag")); got != etag {
+			_ = resp.Body.Close()
 			return Stats{}, fmt.Errorf(
 				"range GET ETag changed: got %q, expected %q",
 				got,
 				etag,
 			)
 		}
-		if err := validateContentRange(resp.Header.Get("Content-Range"), item); err != nil {
-			return Stats{}, err
+
+		if len(batch) == 1 {
+			item := batch[0]
+			if err := validateContentRange(resp.Header.Get("Content-Range"), item); err != nil {
+				_ = resp.Body.Close()
+				return Stats{}, err
+			}
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, item.Length+1))
+			closeErr := resp.Body.Close()
+			if readErr != nil {
+				return Stats{}, readErr
+			}
+			if closeErr != nil {
+				return Stats{}, closeErr
+			}
+			if int64(len(body)) != item.Length {
+				return Stats{}, fmt.Errorf(
+					"range GET returned %d bytes, expected %d",
+					len(body),
+					item.Length,
+				)
+			}
+			total += int64(len(body))
+		} else {
+			mediaType, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+			if err != nil || mediaType != "multipart/byteranges" || params["boundary"] == "" {
+				_ = resp.Body.Close()
+				return Stats{}, fmt.Errorf(
+					"multi-range GET returned invalid Content-Type %q",
+					resp.Header.Get("Content-Type"),
+				)
+			}
+
+			reader := multipart.NewReader(resp.Body, params["boundary"])
+			for i, item := range batch {
+				part, err := reader.NextPart()
+				if err != nil {
+					_ = resp.Body.Close()
+					return Stats{}, fmt.Errorf("multi-range part %d: %w", i, err)
+				}
+				if err := validateContentRange(part.Header.Get("Content-Range"), item); err != nil {
+					_ = part.Close()
+					_ = resp.Body.Close()
+					return Stats{}, fmt.Errorf("multi-range part %d: %w", i, err)
+				}
+				body, readErr := io.ReadAll(io.LimitReader(part, item.Length+1))
+				closeErr := part.Close()
+				if readErr != nil {
+					_ = resp.Body.Close()
+					return Stats{}, readErr
+				}
+				if closeErr != nil {
+					_ = resp.Body.Close()
+					return Stats{}, closeErr
+				}
+				if int64(len(body)) != item.Length {
+					_ = resp.Body.Close()
+					return Stats{}, fmt.Errorf(
+						"multi-range part %d returned %d bytes, expected %d",
+						i,
+						len(body),
+						item.Length,
+					)
+				}
+				total += int64(len(body))
+			}
+			if extra, err := reader.NextPart(); err != io.EOF {
+				if extra != nil {
+					_ = extra.Close()
+				}
+				_ = resp.Body.Close()
+				if err == nil {
+					return Stats{}, errors.New("multi-range GET returned extra response part")
+				}
+				return Stats{}, fmt.Errorf("multi-range trailer: %w", err)
+			}
+			if err := resp.Body.Close(); err != nil {
+				return Stats{}, err
+			}
 		}
-		if int64(len(body)) != item.Length {
-			return Stats{}, fmt.Errorf("range GET returned %d bytes, expected %d", len(body), item.Length)
-		}
-		total += int64(len(body))
+
+		latencies = append(latencies, time.Since(requestStart))
 	}
-	return summarize("emus-http-range", total, time.Since(start), latencies), nil
+
+	return summarize(
+		"emus-http-range",
+		total,
+		time.Since(started),
+		latencies,
+		len(plan),
+	), nil
 }
 
 func MeasureFile(path string, plan []Range) (Stats, error) {
@@ -260,7 +359,7 @@ func MeasureFile(path string, plan []Range) (Stats, error) {
 		}
 		total += int64(n)
 	}
-	return summarize("mounted-file", total, time.Since(start), latencies), nil
+	return summarize("mounted-file", total, time.Since(start), latencies, len(plan)), nil
 }
 
 func validateContentRange(value string, item Range) error {
@@ -333,7 +432,7 @@ func fileURL(baseURL, fileID string) (string, error) {
 	return parsed.String(), nil
 }
 
-func summarize(source string, total int64, elapsed time.Duration, latencies []time.Duration) Stats {
+func summarize(source string, total int64, elapsed time.Duration, latencies []time.Duration, reads int) Stats {
 	seconds := elapsed.Seconds()
 	rate := 0.0
 	if seconds > 0 {
@@ -341,6 +440,7 @@ func summarize(source string, total int64, elapsed time.Duration, latencies []ti
 	}
 	return Stats{
 		Source:       source,
+		Reads:        reads,
 		Requests:     len(latencies),
 		Bytes:        total,
 		ElapsedMS:    millis(elapsed),

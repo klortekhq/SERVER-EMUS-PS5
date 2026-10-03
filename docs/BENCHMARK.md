@@ -20,6 +20,7 @@ go run ./cmd/bench \
   -samples 512 \
   -seed 42 \
   -pattern random \
+  -batch 1 \
   -local /mnt/smb/PS1/Game.chd \
   -json
 ```
@@ -44,9 +45,16 @@ go run ./cmd/bench \
 Do not place the bearer token directly on the command line: shell history and
 process listings can expose command-line arguments.
 
+The HTTP benchmark can group 1 to 16 logical ranges into each request with
+`-batch`. A value above 1 exercises the protocol's standard
+`multipart/byteranges` path. Every returned part is checked against the exact
+requested `Content-Range` and length. The mounted-file baseline still performs
+the same logical read plan directly.
+
 Reported fields include:
 
-- request count;
+- logical read count;
+- HTTP/file operation request count;
 - bytes transferred;
 - total elapsed time;
 - MiB/s;
@@ -85,7 +93,7 @@ Record at least:
 - server OS and storage type;
 - network link speed and topology;
 - file format and size;
-- read size, sample count, seed and access pattern;
+- read size, sample count, seed, access pattern and HTTP batch size;
 - whether the OS-mounted baseline is SMB/NFS/local;
 - raw JSON output.
 
