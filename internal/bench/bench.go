@@ -30,6 +30,10 @@ type Stats struct {
 	MaxMS        float64 `json:"max_ms"`
 }
 
+type HTTPOptions struct {
+	BearerToken string
+}
+
 func Plan(size, readSize int64, count int, seed uint64) ([]Range, error) {
 	if size <= 0 || readSize <= 0 || count <= 0 {
 		return nil, errors.New("size, readSize and count must be positive")
@@ -57,13 +61,16 @@ func Plan(size, readSize int64, count int, seed uint64) ([]Range, error) {
 	return out, nil
 }
 
-func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string) (int64, string, error) {
+func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string, options HTTPOptions) (int64, string, error) {
 	endpoint, err := fileURL(baseURL, fileID)
 	if err != nil {
 		return 0, "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, endpoint, nil)
 	if err != nil {
+		return 0, "", err
+	}
+	if err := applyHTTPOptions(req, options); err != nil {
 		return 0, "", err
 	}
 	resp, err := client.Do(req)
@@ -87,7 +94,7 @@ func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string)
 	return resp.ContentLength, etag, nil
 }
 
-func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag string, plan []Range) (Stats, error) {
+func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag string, plan []Range, options HTTPOptions) (Stats, error) {
 	endpoint, err := fileURL(baseURL, fileID)
 	if err != nil {
 		return Stats{}, err
@@ -105,6 +112,9 @@ func MeasureHTTP(ctx context.Context, client *http.Client, baseURL, fileID, etag
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, item.Offset+item.Length-1))
 		req.Header.Set("If-Match", etag)
+		if err := applyHTTPOptions(req, options); err != nil {
+			return Stats{}, err
+		}
 		requestStart := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -166,6 +176,18 @@ func MeasureFile(path string, plan []Range) (Stats, error) {
 		total += int64(n)
 	}
 	return summarize("mounted-file", total, time.Since(start), latencies), nil
+}
+
+func applyHTTPOptions(req *http.Request, options HTTPOptions) error {
+	token := strings.TrimSpace(options.BearerToken)
+	if token == "" {
+		return nil
+	}
+	if strings.ContainsAny(token, "\r\n") {
+		return errors.New("bearer token contains a line break")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
 }
 
 func fileURL(baseURL, fileID string) (string, error) {
