@@ -620,7 +620,7 @@ func VerifyBaselineSamples(
 	return nil
 }
 
-func validateIdentityEncoding(header http.Header) error {
+func validateIdentityEncoding(header interface{ Get(string) string }) error {
 	value := strings.TrimSpace(header.Get("Content-Encoding"))
 	if value == "" || strings.EqualFold(value, "identity") {
 		return nil
