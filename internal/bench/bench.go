@@ -485,6 +485,122 @@ func MeasureFileTarget(path string, plan []Range, expectedSize int64) (Stats, er
 	return summarize("mounted-file", total, time.Since(start), latencies, len(plan)), nil
 }
 
+func VerifyBaselineSamples(
+	ctx context.Context,
+	client *http.Client,
+	baseURL, fileID, etag, path string,
+	plan []Range,
+	expectedSize int64,
+	sampleCount int,
+	options HTTPOptions,
+) error {
+	if len(plan) == 0 {
+		return errors.New("plan is empty")
+	}
+	if sampleCount <= 0 {
+		return errors.New("baseline verification sample count must be positive")
+	}
+	if expectedSize <= 0 {
+		return errors.New("expected server size must be positive")
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("baseline is not a regular file")
+	}
+	if info.Size() != expectedSize {
+		return fmt.Errorf("baseline file size %d does not match server file size %d", info.Size(), expectedSize)
+	}
+
+	endpoint, err := fileURL(baseURL, fileID)
+	if err != nil {
+		return err
+	}
+
+	if sampleCount > len(plan) {
+		sampleCount = len(plan)
+	}
+	indexes := make([]int, sampleCount)
+	if sampleCount == 1 {
+		indexes[0] = 0
+	} else {
+		last := len(plan) - 1
+		for i := range indexes {
+			indexes[i] = i * last / (sampleCount - 1)
+		}
+	}
+
+	for _, planIndex := range indexes {
+		item := plan[planIndex]
+		if item.Offset < 0 || item.Length <= 0 || item.Offset > expectedSize || item.Length > expectedSize-item.Offset {
+			return fmt.Errorf("verification plan range %d is outside file bounds", planIndex)
+		}
+
+		localBytes := make([]byte, item.Length)
+		n, readErr := f.ReadAt(localBytes, item.Offset)
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return readErr
+		}
+		if int64(n) != item.Length {
+			return fmt.Errorf("baseline verification range %d returned %d bytes, expected %d", planIndex, n, item.Length)
+		}
+
+		rangeEnd := item.Offset + item.Length - 1
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", item.Offset, rangeEnd))
+		req.Header.Set("If-Match", etag)
+		if err := applyHTTPOptions(req, options); err != nil {
+			return err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			_ = resp.Body.Close()
+			return fmt.Errorf("baseline verification range GET returned %s", resp.Status)
+		}
+		if got := strings.TrimSpace(resp.Header.Get("ETag")); got != etag {
+			_ = resp.Body.Close()
+			return fmt.Errorf("baseline verification ETag changed: got %q, expected %q", got, etag)
+		}
+		if err := validateContentRange(resp.Header.Get("Content-Range"), item); err != nil {
+			_ = resp.Body.Close()
+			return fmt.Errorf("baseline verification range %d: %w", planIndex, err)
+		}
+
+		remoteBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, item.Length+1))
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if int64(len(remoteBytes)) != item.Length {
+			return fmt.Errorf("baseline verification range %d returned %d HTTP bytes, expected %d", planIndex, len(remoteBytes), item.Length)
+		}
+		if !bytes.Equal(remoteBytes, localBytes) {
+			return fmt.Errorf("baseline differs from server object at sampled plan range %d (offset=%d length=%d)", planIndex, item.Offset, item.Length)
+		}
+	}
+
+	return nil
+}
+
 func validateContentRange(value string, item Range) error {
 	value = strings.TrimSpace(value)
 	if !strings.HasPrefix(value, "bytes ") {
