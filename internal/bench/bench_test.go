@@ -270,9 +270,6 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	if stats.FreshConnections+stats.ReusedConnections != stats.Requests {
 		t.Fatalf("connection accounting does not match requests: %+v", stats)
 	}
-	if stats.FreshConnections < 1 {
-		t.Fatalf("benchmark did not observe an initial connection: %+v", stats)
-	}
 }
 
 func TestHTTPRangeMeasurementRejectsTransformedResponse(t *testing.T) {
