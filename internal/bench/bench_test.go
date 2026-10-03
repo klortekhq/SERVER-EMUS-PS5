@@ -131,6 +131,32 @@ func TestPlanFileRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestLoadPlanRejectsTrailingJSONAndGarbage(t *testing.T) {
+	base := `{"schema_version":1,"file_size":4096,"read_size":512,"seed":1,"pattern":"random","ranges":[{"offset":0,"length":512}]}`
+
+	for _, tc := range []struct {
+		name   string
+		suffix string
+	}{
+		{name: "second-json-value", suffix: "\n{}"},
+		{name: "trailing-garbage", suffix: "\nnot-json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadPlan(strings.NewReader(base + tc.suffix)); err == nil {
+				t.Fatalf("accepted saved plan with %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestLoadPlanRejectsPayloadLargerThanLimit(t *testing.T) {
+	base := `{"schema_version":1,"file_size":4096,"read_size":512,"seed":1,"pattern":"random","ranges":[{"offset":0,"length":512}]}`
+	padding := strings.Repeat(" ", int(maxPlanFileBytes)+1)
+	if _, err := LoadPlan(strings.NewReader(base + padding)); err == nil {
+		t.Fatal("accepted saved plan larger than 16 MiB")
+	}
+}
+
 func TestHTTPRangeMeasurement(t *testing.T) {
 	data := bytes.Repeat([]byte("0123456789abcdef"), 4096)
 	etag := `"fixture-v1"`

@@ -93,10 +93,11 @@ go run ./cmd/bench ... -plan-in ps1-clustered.json
 ```
 
 The saved plan is strict, versioned JSON containing the probed file size, read
-size, seed, pattern and every logical range. Replay refuses a server object
-whose size no longer matches the recorded plan, preventing accidental
-comparisons against different content. `-plan-out` may also be combined with
-`-plan-in` to normalize or duplicate a validated plan.
+size, seed, pattern and every logical range. Loading rejects unknown fields,
+additional/trailing JSON or garbage, and files larger than 16 MiB before replay.
+Replay also refuses a server object whose size no longer matches the recorded
+plan, preventing accidental comparisons against different content. `-plan-out`
+may be combined with `-plan-in` to normalize or duplicate a validated plan.
 
 ## Recommended benchmark record
 

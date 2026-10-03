@@ -41,13 +41,32 @@ func SavePlan(w io.Writer, plan PlanFile) error {
 	return encoder.Encode(plan)
 }
 
+const maxPlanFileBytes int64 = 16 << 20
+
 func LoadPlan(r io.Reader) (PlanFile, error) {
+	payload, err := io.ReadAll(io.LimitReader(r, maxPlanFileBytes+1))
+	if err != nil {
+		return PlanFile{}, err
+	}
+	if int64(len(payload)) > maxPlanFileBytes {
+		return PlanFile{}, fmt.Errorf("saved plan exceeds %d-byte limit", maxPlanFileBytes)
+	}
+
 	var plan PlanFile
-	decoder := json.NewDecoder(io.LimitReader(r, 16<<20))
+	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&plan); err != nil {
 		return PlanFile{}, err
 	}
+
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return PlanFile{}, errors.New("saved plan contains trailing JSON value")
+		}
+		return PlanFile{}, fmt.Errorf("saved plan contains trailing data: %w", err)
+	}
+
 	if err := ValidatePlanFile(plan); err != nil {
 		return PlanFile{}, err
 	}
