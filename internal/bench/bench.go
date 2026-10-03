@@ -23,9 +23,12 @@ type Range struct {
 	Length int64 `json:"length"`
 }
 
+const CurrentPlanSchema = 2
+
 type PlanFile struct {
 	SchemaVersion int     `json:"schema_version"`
 	FileSize      int64   `json:"file_size"`
+	ETag          string  `json:"etag,omitempty"`
 	ReadSize      int64   `json:"read_size"`
 	Seed          uint64  `json:"seed"`
 	Pattern       Pattern `json:"pattern"`
@@ -74,7 +77,19 @@ func LoadPlan(r io.Reader) (PlanFile, error) {
 }
 
 func ValidatePlanFile(plan PlanFile) error {
-	if plan.SchemaVersion != 1 {
+	switch plan.SchemaVersion {
+	case 1:
+		// Legacy size-bound plans remain readable so they can be normalized by
+		// re-saving them through the current CLI.
+	case CurrentPlanSchema:
+		if strings.TrimSpace(plan.ETag) == "" {
+			return errors.New("plan etag is required by schema 2")
+		}
+		if strings.TrimSpace(plan.ETag) != plan.ETag ||
+			strings.ContainsAny(plan.ETag, "\r\n") {
+			return errors.New("plan etag is not normalized")
+		}
+	default:
 		return fmt.Errorf("unsupported plan schema %d", plan.SchemaVersion)
 	}
 	if plan.FileSize <= 0 || plan.ReadSize <= 0 {
@@ -94,6 +109,24 @@ func ValidatePlanFile(plan PlanFile) error {
 			item.Length > plan.FileSize-item.Offset {
 			return fmt.Errorf("plan range %d is outside file bounds", i)
 		}
+	}
+	return nil
+}
+
+func ValidatePlanTarget(plan PlanFile, fileSize int64, etag string) error {
+	if plan.FileSize != fileSize {
+		return fmt.Errorf(
+			"plan file size %d does not match server file size %d",
+			plan.FileSize,
+			fileSize,
+		)
+	}
+	if plan.SchemaVersion >= CurrentPlanSchema && plan.ETag != strings.TrimSpace(etag) {
+		return fmt.Errorf(
+			"plan etag %q does not match server etag %q",
+			plan.ETag,
+			strings.TrimSpace(etag),
+		)
 	}
 	return nil
 }

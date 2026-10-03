@@ -72,14 +72,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "plan-in close:", closeErr)
 			os.Exit(1)
 		}
-		if loaded.FileSize != size {
-			fmt.Fprintf(
-				os.Stderr,
-				"plan-in: file size %d does not match server file size %d\n",
-				loaded.FileSize,
-				size,
-			)
+		if targetErr := bench.ValidatePlanTarget(loaded, size, etag); targetErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-in:", targetErr)
 			os.Exit(1)
+		}
+		if loaded.SchemaVersion == 1 {
+			fmt.Fprintln(
+				os.Stderr,
+				"plan-in: warning: legacy schema 1 is size-bound only; re-save with -plan-out to bind the current ETag",
+			)
 		}
 		plan = loaded.Ranges
 		*readSize = loaded.ReadSize
@@ -107,8 +108,9 @@ func main() {
 			os.Exit(1)
 		}
 		saveErr := bench.SavePlan(file, bench.PlanFile{
-			SchemaVersion: 1,
+			SchemaVersion: bench.CurrentPlanSchema,
 			FileSize:      size,
+			ETag:          etag,
 			ReadSize:      *readSize,
 			Seed:          *seed,
 			Pattern:       bench.Pattern(*pattern),

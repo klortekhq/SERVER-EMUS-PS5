@@ -92,12 +92,14 @@ go run ./cmd/bench ... -pattern clustered -plan-out ps1-clustered.json
 go run ./cmd/bench ... -plan-in ps1-clustered.json
 ```
 
-The saved plan is strict, versioned JSON containing the probed file size, read
-size, seed, pattern and every logical range. Loading rejects unknown fields,
-additional/trailing JSON or garbage, and files larger than 16 MiB before replay.
-Replay also refuses a server object whose size no longer matches the recorded
-plan, preventing accidental comparisons against different content. `-plan-out`
-may be combined with `-plan-in` to normalize or duplicate a validated plan.
+The saved plan is strict, versioned JSON containing the probed file size,
+ETag, read size, seed, pattern and every logical range. Current schema 2 replay
+requires both the recorded size and ETag to match the probed server object, so
+same-size content replacement cannot silently reuse an old plan. Loading also
+rejects unknown fields, additional/trailing JSON or garbage, and files larger
+than 16 MiB. Legacy schema 1 plans remain readable as size-bound inputs and emit
+a warning; combining `-plan-in` with `-plan-out` normalizes them to schema 2
+with the current ETag.
 
 ## Recommended benchmark record
 

@@ -87,8 +87,9 @@ func TestPlanPatternRejectsUnknownMode(t *testing.T) {
 
 func TestPlanFileRoundTrip(t *testing.T) {
 	original := PlanFile{
-		SchemaVersion: 1,
+		SchemaVersion: CurrentPlanSchema,
 		FileSize:      65536,
+		ETag:          "\"fixture-v1\"",
 		ReadSize:      4096,
 		Seed:          42,
 		Pattern:       PatternClustered,
@@ -107,6 +108,65 @@ func TestPlanFileRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loaded, original) {
 		t.Fatalf("loaded plan=%+v want %+v", loaded, original)
+	}
+}
+
+func TestPlanTargetBindsCurrentSchemaToETag(t *testing.T) {
+	plan := PlanFile{
+		SchemaVersion: CurrentPlanSchema,
+		FileSize:      4096,
+		ETag:          "\"fixture-v1\"",
+		ReadSize:      512,
+		Seed:          1,
+		Pattern:       PatternRandom,
+		Ranges:        []Range{{Offset: 0, Length: 512}},
+	}
+	if err := ValidatePlanFile(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePlanTarget(plan, 4096, "\"fixture-v1\""); err != nil {
+		t.Fatalf("matching target rejected: %v", err)
+	}
+	if err := ValidatePlanTarget(plan, 4096, "\"fixture-v2\""); err == nil {
+		t.Fatal("accepted same-size target with different ETag")
+	}
+	if err := ValidatePlanTarget(plan, 8192, "\"fixture-v1\""); err == nil {
+		t.Fatal("accepted target with different size")
+	}
+}
+
+func TestLegacyPlanRemainsSizeBoundForNormalization(t *testing.T) {
+	plan := PlanFile{
+		SchemaVersion: 1,
+		FileSize:      4096,
+		ReadSize:      512,
+		Seed:          1,
+		Pattern:       PatternRandom,
+		Ranges:        []Range{{Offset: 0, Length: 512}},
+	}
+	if err := ValidatePlanFile(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePlanTarget(plan, 4096, "\"different-etag\""); err != nil {
+		t.Fatalf("legacy plan should remain size-bound: %v", err)
+	}
+}
+
+func TestCurrentPlanSchemaRequiresNormalizedETag(t *testing.T) {
+	base := PlanFile{
+		SchemaVersion: CurrentPlanSchema,
+		FileSize:      4096,
+		ReadSize:      512,
+		Seed:          1,
+		Pattern:       PatternRandom,
+		Ranges:        []Range{{Offset: 0, Length: 512}},
+	}
+	for _, etag := range []string{"", "  ", " \"fixture\"", "\"fixture\"\n"} {
+		plan := base
+		plan.ETag = etag
+		if err := ValidatePlanFile(plan); err == nil {
+			t.Fatalf("accepted invalid ETag %q", etag)
+		}
 	}
 }
 
