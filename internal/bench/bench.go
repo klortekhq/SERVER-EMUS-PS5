@@ -179,12 +179,12 @@ func MeasureFile(path string, plan []Range) (Stats, error) {
 }
 
 func applyHTTPOptions(req *http.Request, options HTTPOptions) error {
+	if strings.ContainsAny(options.BearerToken, "\r\n") {
+		return errors.New("bearer token contains a line break")
+	}
 	token := strings.TrimSpace(options.BearerToken)
 	if token == "" {
 		return nil
-	}
-	if strings.ContainsAny(token, "\r\n") {
-		return errors.New("bearer token contains a line break")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
