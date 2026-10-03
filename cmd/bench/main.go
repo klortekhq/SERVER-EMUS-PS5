@@ -144,7 +144,11 @@ func main() {
 	results := []bench.Stats{httpStats}
 
 	if *localPath != "" {
-		localStats, err := bench.MeasureFile(*localPath, plan)
+		localStats, err := bench.MeasureFileTarget(
+			*localPath,
+			plan,
+			size,
+		)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "baseline benchmark:", err)
 			os.Exit(1)

@@ -371,6 +371,31 @@ func TestMeasureFileUsesSamePlan(t *testing.T) {
 	}
 }
 
+func TestMeasureFileTargetRequiresServerSizeMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixture.bin")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{0x5a}, 8192), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := []Range{{Offset: 0, Length: 4096}}
+
+	stats, err := MeasureFileTarget(path, plan, 8192)
+	if err != nil {
+		t.Fatalf("matching baseline rejected: %v", err)
+	}
+	if stats.Bytes != 4096 || stats.Reads != 1 {
+		t.Fatalf("unexpected matching stats: %+v", stats)
+	}
+
+	if _, err := MeasureFileTarget(path, plan, 16384); err == nil ||
+		!strings.Contains(err.Error(), "does not match server file size") {
+		t.Fatalf("mismatched baseline size was not rejected: %v", err)
+	}
+	if _, err := MeasureFileTarget(path, plan, -1); err == nil {
+		t.Fatal("negative expected baseline size was accepted")
+	}
+}
+
 func TestPlanRejectsInvalidInput(t *testing.T) {
 	for _, tc := range []struct {
 		size     int64

@@ -71,7 +71,10 @@ continuing against a file that changed during the sample.
 
 The same seed, file size, read size, sample count and pattern produce the same
 offset plan. Keep those values fixed when comparing EMUS against an OS-mounted
-SMB path.
+SMB path. When `-local` is supplied, the benchmark now requires the mounted
+baseline file size to match the server object's probed size exactly; a
+different-size file is rejected before timing so a superficially valid read
+plan cannot benchmark a different object by accident.
 
 Three deterministic access patterns are available:
 

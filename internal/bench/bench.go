@@ -434,8 +434,15 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 }
 
 func MeasureFile(path string, plan []Range) (Stats, error) {
+	return MeasureFileTarget(path, plan, 0)
+}
+
+func MeasureFileTarget(path string, plan []Range, expectedSize int64) (Stats, error) {
 	if len(plan) == 0 {
 		return Stats{}, errors.New("plan is empty")
+	}
+	if expectedSize < 0 {
+		return Stats{}, errors.New("expected baseline size cannot be negative")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -448,6 +455,13 @@ func MeasureFile(path string, plan []Range) (Stats, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return Stats{}, errors.New("baseline is not a regular file")
+	}
+	if expectedSize > 0 && info.Size() != expectedSize {
+		return Stats{}, fmt.Errorf(
+			"baseline file size %d does not match server file size %d",
+			info.Size(),
+			expectedSize,
+		)
 	}
 	var total int64
 	latencies := make([]time.Duration, 0, len(plan))
