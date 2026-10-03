@@ -22,6 +22,7 @@ func main() {
 	seed := flag.Uint64("seed", 1, "deterministic plan seed")
 	pattern := flag.String("pattern", "random", "read pattern: random, sequential or clustered")
 	batch := flag.Int("batch", 1, "HTTP ranges per request (1-16)")
+	verifyBaselineSamples := flag.Int("verify-baseline-samples", 8, "sampled byte comparisons after timing when -local is set; 0 disables")
 	planIn := flag.String("plan-in", "", "replay a saved JSON read plan")
 	planOut := flag.String("plan-out", "", "write the generated/replayed JSON read plan")
 	timeout := flag.Duration("timeout", 2*time.Minute, "whole benchmark timeout")
@@ -154,6 +155,28 @@ func main() {
 			os.Exit(1)
 		}
 		results = append(results, localStats)
+
+		if *verifyBaselineSamples < 0 {
+			fmt.Fprintln(os.Stderr, "baseline verification: sample count cannot be negative")
+			os.Exit(2)
+		}
+		if *verifyBaselineSamples > 0 {
+			if err := bench.VerifyBaselineSamples(
+				ctx,
+				client,
+				*serverURL,
+				*fileID,
+				etag,
+				*localPath,
+				plan,
+				size,
+				*verifyBaselineSamples,
+				options,
+			); err != nil {
+				fmt.Fprintln(os.Stderr, "baseline verification:", err)
+				os.Exit(1)
+			}
+		}
 	}
 
 	if *jsonOut {
