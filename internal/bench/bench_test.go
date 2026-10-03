@@ -396,6 +396,60 @@ func TestMeasureFileTargetRequiresServerSizeMatch(t *testing.T) {
 	}
 }
 
+func TestVerifyBaselineSamplesMatchesAndDetectsDifference(t *testing.T) {
+	data := make([]byte, 16*1024)
+	for i := range data {
+		data[i] = byte((i * 29) & 0xff)
+	}
+	etag := `"fixture-v1"`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Accept-Ranges", "bytes")
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Header.Get("If-Match") != etag {
+			http.Error(w, "precondition failed", http.StatusPreconditionFailed)
+			return
+		}
+		http.ServeContent(w, r, "fixture.bin", time.Unix(1, 0), bytes.NewReader(data))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixture.bin")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := []Range{
+		{Offset: 0, Length: 1024},
+		{Offset: 4096, Length: 1024},
+		{Offset: 8192, Length: 1024},
+		{Offset: 12 * 1024, Length: 1024},
+	}
+
+	if err := VerifyBaselineSamples(
+		context.Background(), server.Client(), server.URL, "fixture", etag, path,
+		plan, int64(len(data)), 3, HTTPOptions{},
+	); err != nil {
+		t.Fatalf("matching sampled baseline rejected: %v", err)
+	}
+
+	mutated := append([]byte(nil), data...)
+	mutated[plan[1].Offset+17] ^= 0xff
+	if err := os.WriteFile(path, mutated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyBaselineSamples(
+		context.Background(), server.Client(), server.URL, "fixture", etag, path,
+		plan, int64(len(data)), 3, HTTPOptions{},
+	); err == nil || !strings.Contains(err.Error(), "baseline differs") {
+		t.Fatalf("same-size mismatched baseline was not rejected: %v", err)
+	}
+}
+
 func TestPlanRejectsInvalidInput(t *testing.T) {
 	for _, tc := range []struct {
 		size     int64
