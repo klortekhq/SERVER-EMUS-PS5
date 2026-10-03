@@ -35,31 +35,98 @@ type HTTPOptions struct {
 	BearerToken string
 }
 
+type Pattern string
+
+const (
+	PatternRandom     Pattern = "random"
+	PatternSequential Pattern = "sequential"
+	PatternClustered  Pattern = "clustered"
+)
+
+// Plan preserves the original deterministic random-read behavior.
 func Plan(size, readSize int64, count int, seed uint64) ([]Range, error) {
+	return PlanPattern(size, readSize, count, seed, PatternRandom)
+}
+
+func PlanPattern(size, readSize int64, count int, seed uint64, pattern Pattern) ([]Range, error) {
 	if size <= 0 || readSize <= 0 || count <= 0 {
 		return nil, errors.New("size, readSize and count must be positive")
 	}
 	if readSize > size {
 		readSize = size
 	}
-	maxOffset := size - readSize
 	if seed == 0 {
 		seed = 0x9e3779b97f4a7c15
 	}
+
+	switch pattern {
+	case PatternRandom:
+		return randomPlan(size, readSize, count, seed), nil
+	case PatternSequential:
+		return sequentialPlan(size, readSize, count, seed), nil
+	case PatternClustered:
+		return clusteredPlan(size, readSize, count, seed), nil
+	default:
+		return nil, fmt.Errorf("unsupported benchmark pattern %q", pattern)
+	}
+}
+
+func randomPlan(size, readSize int64, count int, seed uint64) []Range {
+	maxOffset := size - readSize
 	out := make([]Range, count)
 	state := seed
 	for i := range out {
-		state ^= state >> 12
-		state ^= state << 25
-		state ^= state >> 27
-		value := state * 0x2545F4914F6CDD1D
+		value := nextRandom(&state)
 		offset := int64(0)
 		if maxOffset > 0 {
 			offset = int64(value % uint64(maxOffset+1))
 		}
 		out[i] = Range{Offset: offset, Length: readSize}
 	}
-	return out, nil
+	return out
+}
+
+func sequentialPlan(size, readSize int64, count int, seed uint64) []Range {
+	slotCount := size / readSize
+	if slotCount == 0 {
+		slotCount = 1
+	}
+	startSlot := int64(seed % uint64(slotCount))
+	out := make([]Range, count)
+	for i := range out {
+		slot := (startSlot + int64(i)) % slotCount
+		out[i] = Range{Offset: slot * readSize, Length: readSize}
+	}
+	return out
+}
+
+func clusteredPlan(size, readSize int64, count int, seed uint64) []Range {
+	const clusterReads = 8
+	slotCount := size / readSize
+	if slotCount == 0 {
+		slotCount = 1
+	}
+	out := make([]Range, count)
+	state := seed
+	for base := 0; base < count; base += clusterReads {
+		startSlot := int64(nextRandom(&state) % uint64(slotCount))
+		limit := clusterReads
+		if remaining := count - base; remaining < limit {
+			limit = remaining
+		}
+		for i := 0; i < limit; i++ {
+			slot := (startSlot + int64(i)) % slotCount
+			out[base+i] = Range{Offset: slot * readSize, Length: readSize}
+		}
+	}
+	return out
+}
+
+func nextRandom(state *uint64) uint64 {
+	*state ^= *state >> 12
+	*state ^= *state << 25
+	*state ^= *state >> 27
+	return *state * 0x2545F4914F6CDD1D
 }
 
 func ProbeHTTP(ctx context.Context, client *http.Client, baseURL, fileID string, options HTTPOptions) (int64, string, error) {

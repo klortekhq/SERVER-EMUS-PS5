@@ -33,6 +33,58 @@ func TestPlanDeterministicAndBounded(t *testing.T) {
 	}
 }
 
+func TestSequentialPlanIsDeterministicAndContiguous(t *testing.T) {
+	plan, err := PlanPattern(64*1024, 4096, 6, 3, PatternSequential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Range{
+		{Offset: 3 * 4096, Length: 4096},
+		{Offset: 4 * 4096, Length: 4096},
+		{Offset: 5 * 4096, Length: 4096},
+		{Offset: 6 * 4096, Length: 4096},
+		{Offset: 7 * 4096, Length: 4096},
+		{Offset: 8 * 4096, Length: 4096},
+	}
+	if !reflect.DeepEqual(plan, want) {
+		t.Fatalf("sequential plan=%+v want %+v", plan, want)
+	}
+}
+
+func TestClusteredPlanGroupsSequentialReads(t *testing.T) {
+	a, err := PlanPattern(1<<20, 4096, 18, 42, PatternClustered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := PlanPattern(1<<20, 4096, 18, 42, PatternClustered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Fatal("clustered plan is not deterministic")
+	}
+	for cluster := 0; cluster < len(a); cluster += 8 {
+		end := cluster + 8
+		if end > len(a) {
+			end = len(a)
+		}
+		for i := cluster + 1; i < end; i++ {
+			slots := (1 << 20) / 4096
+			prev := a[i-1].Offset / 4096
+			current := a[i].Offset / 4096
+			if current != (prev+1)%int64(slots) {
+				t.Fatalf("cluster is not sequential at %d: %+v", i, a[cluster:end])
+			}
+		}
+	}
+}
+
+func TestPlanPatternRejectsUnknownMode(t *testing.T) {
+	if _, err := PlanPattern(4096, 512, 4, 1, Pattern("bursty")); err == nil {
+		t.Fatal("accepted unsupported benchmark pattern")
+	}
+}
+
 func TestHTTPRangeMeasurement(t *testing.T) {
 	data := bytes.Repeat([]byte("0123456789abcdef"), 4096)
 	etag := `"fixture-v1"`

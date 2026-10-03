@@ -20,6 +20,7 @@ func main() {
 	readSize := flag.Int64("read-size", 64*1024, "bytes per random read")
 	samples := flag.Int("samples", 256, "number of random reads")
 	seed := flag.Uint64("seed", 1, "deterministic plan seed")
+	pattern := flag.String("pattern", "random", "read pattern: random, sequential or clustered")
 	timeout := flag.Duration("timeout", 2*time.Minute, "whole benchmark timeout")
 	jsonOut := flag.Bool("json", false, "emit JSON")
 	flag.Parse()
@@ -51,7 +52,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	plan, err := bench.Plan(size, *readSize, *samples, *seed)
+	plan, err := bench.PlanPattern(
+		size,
+		*readSize,
+		*samples,
+		*seed,
+		bench.Pattern(*pattern),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plan:", err)
 		os.Exit(1)
