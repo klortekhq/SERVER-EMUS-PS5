@@ -3,6 +3,7 @@ package bench
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,62 @@ import (
 type Range struct {
 	Offset int64 `json:"offset"`
 	Length int64 `json:"length"`
+}
+
+type PlanFile struct {
+	SchemaVersion int     `json:"schema_version"`
+	FileSize      int64   `json:"file_size"`
+	ReadSize      int64   `json:"read_size"`
+	Seed          uint64  `json:"seed"`
+	Pattern       Pattern `json:"pattern"`
+	Ranges        []Range `json:"ranges"`
+}
+
+func SavePlan(w io.Writer, plan PlanFile) error {
+	if err := ValidatePlanFile(plan); err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(plan)
+}
+
+func LoadPlan(r io.Reader) (PlanFile, error) {
+	var plan PlanFile
+	decoder := json.NewDecoder(io.LimitReader(r, 16<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&plan); err != nil {
+		return PlanFile{}, err
+	}
+	if err := ValidatePlanFile(plan); err != nil {
+		return PlanFile{}, err
+	}
+	return plan, nil
+}
+
+func ValidatePlanFile(plan PlanFile) error {
+	if plan.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported plan schema %d", plan.SchemaVersion)
+	}
+	if plan.FileSize <= 0 || plan.ReadSize <= 0 {
+		return errors.New("plan file_size and read_size must be positive")
+	}
+	if len(plan.Ranges) == 0 {
+		return errors.New("plan ranges are empty")
+	}
+	switch plan.Pattern {
+	case PatternRandom, PatternSequential, PatternClustered:
+	default:
+		return fmt.Errorf("unsupported benchmark pattern %q", plan.Pattern)
+	}
+	for i, item := range plan.Ranges {
+		if item.Offset < 0 || item.Length <= 0 ||
+			item.Offset > plan.FileSize ||
+			item.Length > plan.FileSize-item.Offset {
+			return fmt.Errorf("plan range %d is outside file bounds", i)
+		}
+	}
+	return nil
 }
 
 type Stats struct {

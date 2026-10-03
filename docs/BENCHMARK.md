@@ -84,6 +84,20 @@ The clustered pattern is intended to exercise emulator read-ahead without
 pretending that one synthetic workload represents every core. Record the
 pattern with benchmark results.
 
+For before/after comparisons across server/client builds, freeze the exact
+logical read plan:
+
+```bash
+go run ./cmd/bench ... -pattern clustered -plan-out ps1-clustered.json
+go run ./cmd/bench ... -plan-in ps1-clustered.json
+```
+
+The saved plan is strict, versioned JSON containing the probed file size, read
+size, seed, pattern and every logical range. Replay refuses a server object
+whose size no longer matches the recorded plan, preventing accidental
+comparisons against different content. `-plan-out` may also be combined with
+`-plan-in` to normalize or duplicate a validated plan.
+
 ## Recommended benchmark record
 
 Record at least:

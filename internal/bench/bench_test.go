@@ -85,6 +85,52 @@ func TestPlanPatternRejectsUnknownMode(t *testing.T) {
 	}
 }
 
+func TestPlanFileRoundTrip(t *testing.T) {
+	original := PlanFile{
+		SchemaVersion: 1,
+		FileSize:      65536,
+		ReadSize:      4096,
+		Seed:          42,
+		Pattern:       PatternClustered,
+		Ranges: []Range{
+			{Offset: 4096, Length: 4096},
+			{Offset: 8192, Length: 4096},
+		},
+	}
+	var encoded bytes.Buffer
+	if err := SavePlan(&encoded, original); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadPlan(bytes.NewReader(encoded.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded, original) {
+		t.Fatalf("loaded plan=%+v want %+v", loaded, original)
+	}
+}
+
+func TestPlanFileRejectsInvalidInput(t *testing.T) {
+	invalid := PlanFile{
+		SchemaVersion: 1,
+		FileSize:      4096,
+		ReadSize:      512,
+		Seed:          1,
+		Pattern:       PatternRandom,
+		Ranges:        []Range{{Offset: 4000, Length: 512}},
+	}
+	if err := ValidatePlanFile(invalid); err == nil {
+		t.Fatal("accepted out-of-bounds saved plan")
+	}
+
+	_, err := LoadPlan(strings.NewReader(
+		`{"schema_version":1,"file_size":4096,"read_size":512,"seed":1,"pattern":"random","ranges":[{"offset":0,"length":512}],"unexpected":true}`,
+	))
+	if err == nil {
+		t.Fatal("accepted unknown saved-plan field")
+	}
+}
+
 func TestHTTPRangeMeasurement(t *testing.T) {
 	data := bytes.Repeat([]byte("0123456789abcdef"), 4096)
 	etag := `"fixture-v1"`

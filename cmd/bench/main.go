@@ -22,6 +22,8 @@ func main() {
 	seed := flag.Uint64("seed", 1, "deterministic plan seed")
 	pattern := flag.String("pattern", "random", "read pattern: random, sequential or clustered")
 	batch := flag.Int("batch", 1, "HTTP ranges per request (1-16)")
+	planIn := flag.String("plan-in", "", "replay a saved JSON read plan")
+	planOut := flag.String("plan-out", "", "write the generated/replayed JSON read plan")
 	timeout := flag.Duration("timeout", 2*time.Minute, "whole benchmark timeout")
 	jsonOut := flag.Bool("json", false, "emit JSON")
 	flag.Parse()
@@ -53,16 +55,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	plan, err := bench.PlanPattern(
-		size,
-		*readSize,
-		*samples,
-		*seed,
-		bench.Pattern(*pattern),
-	)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "plan:", err)
-		os.Exit(1)
+	var plan []bench.Range
+	if *planIn != "" {
+		file, openErr := os.Open(*planIn)
+		if openErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-in:", openErr)
+			os.Exit(1)
+		}
+		loaded, loadErr := bench.LoadPlan(file)
+		closeErr := file.Close()
+		if loadErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-in:", loadErr)
+			os.Exit(1)
+		}
+		if closeErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-in close:", closeErr)
+			os.Exit(1)
+		}
+		if loaded.FileSize != size {
+			fmt.Fprintf(
+				os.Stderr,
+				"plan-in: file size %d does not match server file size %d\n",
+				loaded.FileSize,
+				size,
+			)
+			os.Exit(1)
+		}
+		plan = loaded.Ranges
+		*readSize = loaded.ReadSize
+		*seed = loaded.Seed
+		*pattern = string(loaded.Pattern)
+	} else {
+		var planErr error
+		plan, planErr = bench.PlanPattern(
+			size,
+			*readSize,
+			*samples,
+			*seed,
+			bench.Pattern(*pattern),
+		)
+		if planErr != nil {
+			fmt.Fprintln(os.Stderr, "plan:", planErr)
+			os.Exit(1)
+		}
+	}
+
+	if *planOut != "" {
+		file, createErr := os.Create(*planOut)
+		if createErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-out:", createErr)
+			os.Exit(1)
+		}
+		saveErr := bench.SavePlan(file, bench.PlanFile{
+			SchemaVersion: 1,
+			FileSize:      size,
+			ReadSize:      *readSize,
+			Seed:          *seed,
+			Pattern:       bench.Pattern(*pattern),
+			Ranges:        plan,
+		})
+		closeErr := file.Close()
+		if saveErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-out:", saveErr)
+			os.Exit(1)
+		}
+		if closeErr != nil {
+			fmt.Fprintln(os.Stderr, "plan-out close:", closeErr)
+			os.Exit(1)
+		}
 	}
 
 	httpStats, err := bench.MeasureHTTPBatched(
