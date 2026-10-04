@@ -270,6 +270,16 @@ func TestHTTPRangeMeasurement(t *testing.T) {
 	if stats.FreshConnections+stats.ReusedConnections != stats.Requests {
 		t.Fatalf("connection accounting does not match requests: %+v", stats)
 	}
+	expectedReusePercent :=
+		100 * float64(stats.ReusedConnections) / float64(stats.Requests)
+	if stats.ConnectionReusePercent != expectedReusePercent {
+		t.Fatalf(
+			"reuse percent=%f want=%f stats=%+v",
+			stats.ConnectionReusePercent,
+			expectedReusePercent,
+			stats,
+		)
+	}
 }
 
 func TestHTTPRangeMeasurementRejectsTransformedResponse(t *testing.T) {
@@ -372,6 +382,9 @@ func TestHTTPBatchedRangeMeasurement(t *testing.T) {
 	}
 	if stats.FreshConnections+stats.ReusedConnections != stats.Requests {
 		t.Fatalf("batched connection accounting mismatch: %+v", stats)
+	}
+	if stats.ConnectionReusePercent < 0 || stats.ConnectionReusePercent > 100 {
+		t.Fatalf("batched connection reuse percent out of range: %+v", stats)
 	}
 }
 

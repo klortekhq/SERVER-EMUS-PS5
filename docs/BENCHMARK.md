@@ -62,7 +62,8 @@ Reported fields include:
 - p95 latency;
 - maximum latency;
 - fresh TCP connections observed by the HTTP transport;
-- reused persistent connections observed by the HTTP transport.
+- reused persistent connections observed by the HTTP transport;
+- connection-reuse percentage for the timed HTTP requests.
 
 The HTTP side probes the file with `HEAD`, requires `Accept-Ranges: bytes`
 and an ETag, then sends each read with both `Range` and `If-Match`. Probe,
@@ -139,8 +140,10 @@ Physical PS5 measurements remain a separate validation gate.
 
 ## Connection reuse evidence
 
-The HTTP result records `fresh_connections` and `reused_connections` using
-Go's client transport trace. This makes the persistent-connection assumption
+The HTTP result records `fresh_connections`, `reused_connections` and
+`connection_reuse_percent` using Go's client transport trace. Plain-text
+output prints the same evidence when an HTTP connection sample exists. This
+makes the persistent-connection assumption
 measurable instead of implicit: a benchmark that unexpectedly reconnects for
 every Range request is visible in the JSON result and should not be compared as
 if it were using the intended steady-state transport.

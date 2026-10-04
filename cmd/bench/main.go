@@ -191,7 +191,7 @@ func main() {
 
 	for _, result := range results {
 		fmt.Printf(
-			"%s reads=%d requests=%d bytes=%d elapsed=%.2fms MiB/s=%.2f p50=%.3fms p95=%.3fms max=%.3fms\n",
+			"%s reads=%d requests=%d bytes=%d elapsed=%.2fms MiB/s=%.2f p50=%.3fms p95=%.3fms max=%.3fms",
 			result.Source,
 			result.Reads,
 			result.Requests,
@@ -202,5 +202,14 @@ func main() {
 			result.P95MS,
 			result.MaxMS,
 		)
+		if result.FreshConnections+result.ReusedConnections > 0 {
+			fmt.Printf(
+				" fresh_conn=%d reused_conn=%d reuse=%.1f%%",
+				result.FreshConnections,
+				result.ReusedConnections,
+				result.ConnectionReusePercent,
+			)
+		}
+		fmt.Println()
 	}
 }

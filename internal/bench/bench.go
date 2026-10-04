@@ -133,17 +133,18 @@ func ValidatePlanTarget(plan PlanFile, fileSize int64, etag string) error {
 }
 
 type Stats struct {
-	Source       string  `json:"source"`
-	Reads        int     `json:"reads"`
-	Requests     int     `json:"requests"`
-	Bytes        int64   `json:"bytes"`
-	ElapsedMS    float64 `json:"elapsed_ms"`
-	MiBPerSecond float64 `json:"mib_per_second"`
-	P50MS        float64 `json:"p50_ms"`
-	P95MS        float64 `json:"p95_ms"`
-	MaxMS             float64 `json:"max_ms"`
-	FreshConnections  int     `json:"fresh_connections,omitempty"`
-	ReusedConnections int     `json:"reused_connections,omitempty"`
+	Source                 string  `json:"source"`
+	Reads                  int     `json:"reads"`
+	Requests               int     `json:"requests"`
+	Bytes                  int64   `json:"bytes"`
+	ElapsedMS              float64 `json:"elapsed_ms"`
+	MiBPerSecond           float64 `json:"mib_per_second"`
+	P50MS                  float64 `json:"p50_ms"`
+	P95MS                  float64 `json:"p95_ms"`
+	MaxMS                  float64 `json:"max_ms"`
+	FreshConnections       int     `json:"fresh_connections,omitempty"`
+	ReusedConnections      int     `json:"reused_connections,omitempty"`
+	ConnectionReusePercent float64 `json:"connection_reuse_percent,omitempty"`
 }
 
 type HTTPOptions struct {
@@ -462,6 +463,11 @@ func MeasureHTTPBatched(ctx context.Context, client *http.Client, baseURL, fileI
 	)
 	stats.FreshConnections = freshConnections
 	stats.ReusedConnections = reusedConnections
+	connectionSamples := freshConnections + reusedConnections
+	if connectionSamples > 0 {
+		stats.ConnectionReusePercent =
+			100 * float64(reusedConnections) / float64(connectionSamples)
+	}
 	return stats, nil
 }
 
