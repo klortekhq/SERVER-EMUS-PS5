@@ -346,3 +346,17 @@ benchmarks, including Range/full-GET byte totals and cumulative/max file-request
 latency. The remaining work is physical-PS5 `emus://` validation,
 measured prefetch tuning and real LAN benchmarks against SMB. Anchored descriptor sidecars are now implemented so CUE/CCD/TOC/M3U
 layouts can stay portable without polluting the games catalog.
+
+<!-- KLORTEK-MANAGER:START -->
+## Managed development status
+
+This project follows the current Klortek PROMPTMASTER and its project-specific instructions. Approved user directions take precedence; implementation, tests and recorded evidence drive the next task.
+
+**Verified milestone: 5%** — Scope registered; next milestone awaits verification.
+
+This conservative milestone index is not a measure of all planned features or a promise of release readiness. Existing verified prototypes remain evidence even when a newer experimental build is blocked. Projects shown at 5% have registered scope; additional implementation is not credited until its results are reviewed. Last review: 2026-10-07.
+
+Work on owned repositories uses `main` and the `klortekhq` identity. Preserve active work, validate changes before publication, and keep proprietary assets, dumps, private SDKs and secrets out of GitHub. External references retain their licenses and attribution. Update project state and public progress only from actual results.
+
+[Ecosystem progress](https://klortekhq.github.io/#ps5-projects)
+<!-- KLORTEK-MANAGER:END -->
