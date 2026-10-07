@@ -1,0 +1,13 @@
+{
+  "listen": "0.0.0.0:8787",
+  "token": "",
+  "libraries": [
+    {
+      "name": "PS1",
+      "system": "ps1",
+      "path": "/mnt/user/Multimedia/RomsRVK/PS1",
+      "recursive": true,
+      "extensions": [".cue", ".chd", ".pbp", ".iso", ".ccd", ".toc", ".m3u", ".exe"]
+    }
+  ]
+}

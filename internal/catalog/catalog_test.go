@@ -1,0 +1,298 @@
+package catalog
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/klortekhq/server-emus-ps5/internal/config"
+)
+
+func TestCatalogFiltersAndHidesHostPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "game.chd"), []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ignore.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat, err := New(config.Config{Libraries: []config.Library{{
+		Name: "PS1", System: "ps1", Path: root, Recursive: true, Extensions: []string{".chd"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := cat.Entries("ps1")
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].RelativePath != "game.chd" {
+		t.Fatalf("unexpected relative path: %q", entries[0].RelativePath)
+	}
+	if entries[0].ID == "" || entries[0].ETag == "" {
+		t.Fatal("missing stable metadata")
+	}
+	if entries[0].HostPath == "" {
+		t.Fatal("internal host path should exist inside catalog")
+	}
+}
+
+func TestConcurrentRebuildCannotRestoreReplacedLibraries(t *testing.T) {
+	oldRoot := t.TempDir()
+	for i := 0; i < 256; i++ {
+		name := filepath.Join(oldRoot, fmt.Sprintf("old-%03d.iso", i))
+		if err := os.WriteFile(name, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	newRoot := t.TempDir()
+	newGame := filepath.Join(newRoot, "new.chd")
+	if err := os.WriteFile(newGame, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldConfig := config.Config{Libraries: []config.Library{{
+		Name: "Old", System: "ps1", Path: oldRoot, Recursive: true, Extensions: []string{".iso"},
+	}}}
+	newConfig := config.Config{Libraries: []config.Library{{
+		Name: "New", System: "ps2", Path: newRoot, Recursive: true, Extensions: []string{".chd"},
+	}}}
+	cat, err := New(oldConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := New(newConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workerErrors := make(chan error, 24)
+	for i := 0; i < 24; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			if err := cat.Rebuild(); err != nil && err != errStaleRebuild {
+				workerErrors <- err
+			}
+		}()
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		<-start
+		for i := 0; i < 24; i++ {
+			cat.ReplaceFrom(replacement)
+		}
+	}()
+	close(start)
+	workers.Wait()
+	close(workerErrors)
+	for err := range workerErrors {
+		t.Errorf("unexpected concurrent rebuild error: %v", err)
+	}
+
+	if err := cat.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	expectedNewGame, err := filepath.EvalSymlinks(newGame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := cat.Entries("")
+	if len(entries) != 1 || entries[0].HostPath != expectedNewGame || entries[0].System != "ps2" {
+		t.Fatalf("stale rebuild restored replaced libraries: %+v", entries)
+	}
+}
+
+func TestCatalogLoadsMetadataWithoutExposingHostPaths(t *testing.T) {
+	root := t.TempDir()
+	gamePath := filepath.Join(root, "game.iso")
+	if err := os.WriteFile(gamePath, []byte("game"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{
+	  "title": "Example Game",
+	  "identifiers": [{"kind":"disc_serial","value":"BLES12345","region":"Europe","revision":"1.00"}],
+	  "references": [{"label":"Official page","url":"https://example.org/game"}],
+	  "artwork": [{"kind":"box_front","path":"art/front.png","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","license":"user-provided"}],
+	  "cheats": [{"format":"libretro-cht","path":"cheats/game.cht","game_version":"1.00","emulator":"example-core","license":"CC-BY-SA-4.0","attribution":"community"}]
+	}`
+	if err := os.WriteFile(gamePath+".emus.json", []byte(metadata), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat, err := New(config.Config{Libraries: []config.Library{{
+		Name: "PS3", System: "ps3", Path: root, Recursive: true, Extensions: []string{".iso"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := cat.Entries("ps3")
+	if len(entries) != 1 || entries[0].Metadata == nil {
+		t.Fatalf("metadata was not attached to one game entry: %+v", entries)
+	}
+	got := entries[0].Metadata
+	if got.Title != "Example Game" || len(got.Identifiers) != 1 || got.Identifiers[0].Value != "BLES12345" {
+		t.Fatalf("unexpected identity metadata: %+v", got)
+	}
+	if len(got.Artwork) != 1 || got.Artwork[0].Path != "art/front.png" || len(got.Cheats) != 1 || got.Cheats[0].Path != "cheats/game.cht" {
+		t.Fatalf("unexpected optional resources: %+v", got)
+	}
+	encoded, err := json.Marshal(entries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), root) || strings.Contains(string(encoded), gamePath) {
+		t.Fatalf("host path leaked in public catalog entry: %s", encoded)
+	}
+	before := cat.Revision()
+	if err := os.WriteFile(gamePath+".emus.json", []byte(strings.Replace(metadata, "Example Game", "Updated Name", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if cat.Revision() == before {
+		t.Fatal("metadata changes must change the catalog ETag")
+	}
+}
+
+func TestMetadataRejectsUnsafeResourcePathsAndURLs(t *testing.T) {
+	for _, m := range []GameMetadata{
+		{Artwork: []ArtworkResource{{Kind: "box", Path: "art/../../secret.png"}}},
+		{Cheats: []CheatResource{{Format: "cht", URL: "http://example.org/cheats"}}},
+		{Artwork: []ArtworkResource{{Kind: "box", Path: "art/front.png", SHA256: "not-a-hash"}}},
+	} {
+		if err := validateGameMetadata(&m); err == nil {
+			t.Fatalf("unsafe metadata accepted: %+v", m)
+		}
+	}
+}
+
+func TestResolveFromAnchorKeepsSidecarsInsideLibrary(t *testing.T) {
+	root := t.TempDir()
+	gameDir := filepath.Join(root, "sets", "Ridge Racer")
+	if err := os.MkdirAll(filepath.Join(gameDir, "tracks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	files := map[string]string{
+		filepath.Join(gameDir, "Ridge Racer.cue"):       "FILE \"tracks/track01.bin\" BINARY\n",
+		filepath.Join(gameDir, "tracks", "track01.bin"): "TRACK",
+		filepath.Join(root, "sets", "cover.bin"):        "PARENT",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(name, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cat, err := New(config.Config{Libraries: []config.Library{{
+		Name:       "PS1",
+		System:     "ps1",
+		Path:       root,
+		Recursive:  true,
+		Extensions: []string{".cue"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cue Entry
+	for _, entry := range cat.Entries("ps1") {
+		if entry.Name == "Ridge Racer.cue" {
+			cue = entry
+			break
+		}
+	}
+	if cue.ID == "" {
+		t.Fatal("cue anchor not catalogued")
+	}
+
+	if got := len(cat.Entries("ps1")); got != 1 {
+		t.Fatalf("sidecars leaked into launchable catalog: got %d entries", got)
+	}
+
+	track, ok := cat.ResolveFromAnchor(cue.ID, "tracks/track01.bin")
+	if !ok || track.Name != "track01.bin" {
+		t.Fatalf("sidecar resolution failed: ok=%v entry=%+v", ok, track)
+	}
+
+	parent, ok := cat.ResolveFromAnchor(cue.ID, "../cover.bin")
+	if !ok || parent.Name != "cover.bin" {
+		t.Fatalf("in-library parent resolution failed: ok=%v entry=%+v", ok, parent)
+	}
+
+	if _, ok := cat.ResolveFromAnchor(cue.ID, "../../../outside.bin"); ok {
+		t.Fatal("anchor traversal escaped configured library")
+	}
+	if _, ok := cat.ResolveFromAnchor(cue.ID, "/etc/passwd"); ok {
+		t.Fatal("absolute virtual path was accepted")
+	}
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.bin")
+	if err := os.WriteFile(secret, []byte("SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(gameDir, "escape.bin")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Logf("symlink escape test skipped on this runner: %v", err)
+		return
+	}
+	if _, ok := cat.ResolveFromAnchor(cue.ID, "escape.bin"); ok {
+		t.Fatal("symlink escaped configured library")
+	}
+}
+
+func TestOpenArtworkUsesCatalogBoundary(t *testing.T) {
+	root := t.TempDir()
+	gamePath := filepath.Join(root, "game.iso")
+	artDir := filepath.Join(root, "art")
+	if err := os.MkdirAll(artDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gamePath, []byte("game"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artDir, "front.png"), []byte("PNGDATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"artwork":[{"kind":"box_front","path":"art/front.png","license":"user-provided"}]}`
+	if err := os.WriteFile(gamePath+".emus.json", []byte(metadata), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := New(config.Config{Libraries: []config.Library{{
+		Name: "PS3", System: "ps3", Path: root, Recursive: true, Extensions: []string{".iso"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := cat.Entries("ps3")[0]
+	f, opened, resource, err := cat.OpenArtwork(entry.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	body, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "PNGDATA" || opened.Name != "front.png" || resource.Kind != "box_front" {
+		t.Fatalf("unexpected artwork open result: body=%q entry=%+v resource=%+v", body, opened, resource)
+	}
+	if _, _, _, err := cat.OpenArtwork(entry.ID, 1); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("out-of-range artwork error = %v, want os.ErrNotExist", err)
+	}
+}

@@ -1,0 +1,7 @@
+/server-emus
+/server-emus.exe
+/config.json
+/data/
+*.log
+.DS_Store
+Thumbs.db
